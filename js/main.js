@@ -86,6 +86,13 @@ function frameStep() {
   for (let q = sel; q; q = q.parent) if (q.kind === 'polymer' && q.obj.home && !q.obj.home.dead) renderer.placeInternal(q.obj, q.obj.home);
   opts.selected = sel && !sel.gone ? sel.obj : null;
   opts.selection = sel && !sel.gone ? sel : null;
+  // Following is a setting, not part of one selection: whatever is selected next is followed too,
+  // starting from the current view so the camera doesn't jump.
+  if (sel && !sel.gone && !flight && sel.follow !== followOn) {
+    sel.follow = followOn;
+    if (followOn) { const t = followTarget(sel); sel.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; sel._last = undefined; sel._avgStep = undefined; }
+    ui.lastHTML = null;
+  }
   if (flight) fly(dt);
   else if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }
@@ -136,7 +143,7 @@ $('file-load').onchange = async (e) => {
     ui.toast(`Could not load: ${err.message}`, world.t);
   }
 };
-$('btn-fit').onclick = () => { renderer.fit(); if (ui.selected) ui.selected.follow = false; };
+$('btn-fit').onclick = () => { renderer.fit(); reframe(); };
 // Zoom presets: jump to a physical field of view, centred on the selection if there is one.
 for (const b of document.querySelectorAll('[data-fov]')) {
   b.onclick = () => {
@@ -145,7 +152,7 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     flight = null;
     renderer.setFieldWidthNm(fov);
     const sel = ui.selected;
-    if (sel && !sel.gone) { const t = followTarget(sel); sel.follow = true; sel.offset = { x: sel.obj.x - t.x, y: sel.obj.y - t.y }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
+    if (sel && !sel.gone) { const t = followTarget(sel); followOn = sel.follow = true; sel.offset = { x: sel.obj.x - t.x, y: sel.obj.y - t.y }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
   };
 }
 $('speed').oninput = (e) => setSpeed(+e.target.value);
@@ -201,7 +208,7 @@ canvas.addEventListener('pointermove', (e) => {
     flight = null;
     canvas.classList.add('dragging');
     renderer.pan(dx, dy);
-    if (ui.selected) ui.selected.follow = false;
+    reframe(); // while following, dragging just shifts where the subject sits on screen
   }
   drag.x = e.clientX; drag.y = e.clientY;
 });
@@ -312,7 +319,7 @@ function focus(s) {
   if (s.kind === 'polymer') s.obj._rad = polymerRadius(s.obj);
   ui.select(world, s);
   if (s.obj.dead) return;
-  s.follow = false; // follow starts once we arrive
+  s.follow = followOn; // chasing waits until we arrive (the flight steers the camera meanwhile)
   flight = { sel: s, t: 0, dur: 0.9, from: { x: renderer.cam.x, y: renderer.cam.y, fov: renderer.fieldWidthNm() } };
 }
 
@@ -337,7 +344,7 @@ function fly(dt) {
   } else leg(from, to, e);
   if (u >= 1) {
     flight = null;
-    s.follow = true;
+    followOn = s.follow = true; // a fly-to ends following its destination
     const ft = followTarget(s);
     s.offset = { x: c.x - ft.x, y: c.y - ft.y }; // keep the part itself in the middle
   }
@@ -362,15 +369,26 @@ function pick(p) {
   ui.select(world, topLevelAt(world, p, tol, opts.showChem));
 }
 
+// Only the Follow button and the F key turn following off.
+let followOn = false;
 function toggleFollow() {
   const s = ui.selected;
   if (!s || s.gone) return;
-  s.follow = !s.follow;
+  followOn = s.follow = !s.follow;
   // Keep the object where it is on screen instead of snapping it to the centre.
   if (s.follow) { const t = followTarget(s); s.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; }
   ui.lastHTML = null;
 }
 ui.onFollow = toggleFollow;
+
+// Keep the current view as the following framing (after a drag or Fit).
+function reframe() {
+  const s = ui.selected;
+  if (!s || s.gone || !s.follow) return;
+  const t = followTarget(s);
+  s.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y };
+  s._last = undefined; s._avgStep = undefined;
+}
 
 // Up one level (inspector button or Esc); keeps following and keeps the view steady.
 function goUp() {
