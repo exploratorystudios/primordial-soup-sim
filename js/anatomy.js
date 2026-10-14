@@ -33,7 +33,8 @@ function scatter(rng, n, rMin, rMax, avoid = []) {
 }
 
 export function buildAnatomy(c) {
-  const key = (c.mito ? 1 : 0) | (c.plastid ? 2 : 0) | (c.effP > 0.25 ? 4 : 0) | (c.dna ? 8 : 0) | (Math.round(c.transl * 4) << 4);
+  const shown = c.mitoN ?? 99;
+  const key = ((c.mito ? 1 : 0) | (c.plastid ? 2 : 0) | (c.effP > 0.25 ? 4 : 0) | (c.dna ? 8 : 0) | (Math.round(c.transl * 4) << 4)) + Math.min(shown, 99) * 1024;
   const old = c._anat;
   if (old && old.key === key && old.r === c.r) return old;
   const rng = new RNG((Math.imul(c.id, 2654435761) ^ 0x9e3779b9) >>> 0);
@@ -81,6 +82,7 @@ export function buildAnatomy(c) {
       const rr = 0.52 + rng.next() * 0.3, th = rng.next() * TAU;
       a.mitos.push({ fx: Math.cos(th) * rr, fy: Math.sin(th) * rr, ang: rng.next() * Math.PI, s: 0.8 + rng.next() * 0.4 });
     }
+    a.mitos = a.mitos.slice(0, Math.max(1, Math.min(a.mitos.length, shown)));
     if (c.plastid) {
       const np = Math.max(1, Math.min(4, Math.round(areaUm2 / 20)));
       for (let k = 0; k < np; k++) {

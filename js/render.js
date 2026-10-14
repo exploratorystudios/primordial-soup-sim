@@ -38,6 +38,7 @@ const OVERLAY = {
   nutrient: { rgb: [140, 255, 120], ref: 1.2 },
 };
 const TAU = Math.PI * 2;
+const ease = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
 
 // A deterministic "sequence" for drawn DNA so a given cell always shows the same bases.
 export function dnaBase(seed, seg, k) {
@@ -187,9 +188,25 @@ export class Renderer {
 
     this.drawVents(world);
     this.drawWater();
+    this.prepFx(world);
     if (opts.showChem) this.drawChemistry(world);
+    // Dividing cells are drawn emerging from the mother's position (a stretching peanut).
+    const moved = [];
+    for (const e of this.fxNow) {
+      if (e.type !== 'divide' || e.mx === undefined) continue;
+      const k = ease(Math.min(1, e.u * 1.6));
+      for (const c of [e.a, e.b]) {
+        if (c.dead) continue;
+        c._dividing = true;
+        moved.push([c, c.x, c.y]);
+        c.x = e.mx + (c.x - e.mx) * (0.55 + 0.45 * k); c.y = e.my + (c.y - e.my) * (0.55 + 0.45 * k);
+      }
+    }
+    this.drawFxUnder();
     this.drawLife(world, opts);
     this.drawViruses(world);
+    this.drawFx(world);
+    for (const [c, x, y] of moved) { c.x = x; c.y = y; c._dividing = false; }
 
     if (opts.selection) this.drawSelection(opts.selection);
     else if (opts.selected) this.drawSelection(opts.selected);
@@ -338,6 +355,7 @@ export class Renderer {
       if (!this.inView(p.x, p.y, p.seq.length * DIM.ntRise * NM)) continue;
       const ang = this.freeAngle(p), j = this.jig(p._ph * 977, 0.6);
       p._rx = p.x + j.x; p._ry = p.y + j.y; // where it is drawn this frame
+      if (p._peel) { const k = ease(p._peel.u); p._rx = p._peel.x + (p._rx - p._peel.x) * k; p._ry = p._peel.y + (p._ry - p._peel.y) * k; }
       this.drawPolymer(p, p._rx, p._ry, ang);
     }
 
@@ -464,6 +482,195 @@ export class Renderer {
     p._bx = ve.x + p._fx * inner; p._by = ve.y + p._fy * inner; // its home spot in the protocell
     const j = this.jig(p._ph * 977, 0.6);
     p.x = p._rx = ve.x + fx * inner + j.x; p.y = p._ry = ve.y + fy * inner + j.y;
+  }
+
+  // ------------------------------------------------------------- event animations
+  // Events from the simulation (world.fx) play out over a few dozen ticks of simulation time, so
+  // they are visible at slow speeds and freeze when paused.
+  prepFx(world) {
+    this.fxNow = [];
+    for (const e of world.fx) {
+      const u = (this.time - e.t) / e.dur;
+      if (u < 0 || u > 1) { if (e.type === 'peel' && e.kid._peel === e) e.kid._peel = null; continue; }
+      e.u = u;
+      this.fxNow.push(e);
+      if (e.type === 'peel') e.kid._peel = e;
+    }
+  }
+
+  // Pinching waists for dividing cells and vesicles, drawn beneath them so only the narrowing
+  // bridge between the two daughters shows.
+  drawFxUnder() {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    for (const e of this.fxNow) {
+      if (e.type !== 'divide' && e.type !== 'vsplit') continue;
+      const a = e.a, b = e.b;
+      if (a.dead || b.dead || !this.inView(a.x, a.y, a.r * 3) || a.r * this.ppu < 2) continue;
+      const k = ease(e.u), ra = a.r * 0.92, rb = b.r * 0.92;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d, nx = -uy, ny = ux;
+      const waist = Math.min(ra, rb) * 0.95 * (1 - k); // narrows to nothing as the daughters part
+      if (waist <= 0) continue;
+      const mx = (a.x + b.x) / 2 - cx, my = (a.y + b.y) / 2 - cy;
+      // Only the gap outside both daughters (they are translucent, so the bridge must not show through).
+      ctx.save();
+      const v = this.v, vr = [v.x0 - cx, v.y0 - cy, v.x1 - v.x0, v.y1 - v.y0];
+      for (const o of [a, b]) {
+        const clip = new Path2D();
+        clip.rect(...vr);
+        clip.arc(o.x - cx, o.y - cy, o.r, 0, TAU);
+        ctx.clip(clip, 'evenodd');
+      }
+      ctx.beginPath();
+      ctx.moveTo(a.x - cx + nx * ra, a.y - cy + ny * ra);
+      ctx.quadraticCurveTo(mx + nx * waist, my + ny * waist, b.x - cx + nx * rb, b.y - cy + ny * rb);
+      ctx.lineTo(b.x - cx - nx * rb, b.y - cy - ny * rb);
+      ctx.quadraticCurveTo(mx - nx * waist, my - ny * waist, a.x - cx - nx * ra, a.y - cy - ny * ra);
+      ctx.closePath();
+      if (e.type === 'divide') {
+        ctx.restore(); ctx.save(); // the body is one shape, so no clip: both daughters + the waist
+        const body = new Path2D();
+        // Wind the waist the same way as the arcs (nonzero fill), so the three pieces merge into one body.
+        const P = [[a.x - cx + nx * ra, a.y - cy + ny * ra], [mx + nx * waist, my + ny * waist], [b.x - cx + nx * rb, b.y - cy + ny * rb],
+          [b.x - cx - nx * rb, b.y - cy - ny * rb], [mx - nx * waist, my - ny * waist], [a.x - cx - nx * ra, a.y - cy - ny * ra]];
+        const quad = [P[0], P[2], P[3], P[5]];
+        let area = 0;
+        for (let i = 0; i < 4; i++) { const [x1, y1] = quad[i], [x2, y2] = quad[(i + 1) % 4]; area += x1 * y2 - x2 * y1; }
+        const W = area > 0 ? P : [...P].reverse();
+        body.moveTo(...W[0]); body.quadraticCurveTo(...W[1], ...W[2]); body.lineTo(...W[3]); body.quadraticCurveTo(...W[4], ...W[5]); body.closePath();
+        body.moveTo(a.x - cx + a.r, a.y - cy); body.arc(a.x - cx, a.y - cy, a.r, 0, TAU);
+        body.moveTo(b.x - cx + b.r, b.y - cy); body.arc(b.x - cx, b.y - cy, b.r, 0, TAU);
+        ctx.fillStyle = a.trophColor;
+        ctx.globalAlpha = 0.35 + 0.65 * Math.max(0.15, Math.min(1, a.energy / a.cap));
+        ctx.fill(body, 'nonzero');
+        ctx.globalAlpha = 1;
+        ctx.restore();
+        continue;
+      }
+      ctx.strokeStyle = e.type === 'divide' ? 'rgba(255,255,255,0.35)' : 'rgba(245,232,180,0.9)';
+      ctx.lineWidth = Math.max(DIM.bilayer * NM, this.px);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  drawFx(world) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, px = this.px;
+    for (const e of this.fxNow) {
+      const u = e.u, k = ease(u);
+      switch (e.type) {
+        case 'divide': break; // drawn underneath the cells (drawFxUnder)
+        case 'engulf': {
+          // Phagocytosis: the prey is pulled into the predator inside a food vacuole.
+          const p = e.pred, q = e.prey;
+          if (p.dead || !this.inView(p.x, p.y, p.r * 3)) break;
+          const x = q.x + (p.x - q.x) * k, y = q.y + (p.y - q.y) * k, r = q.r * (1 - 0.55 * k);
+          if (r * this.ppu < 1) break;
+          ctx.globalAlpha = 1 - 0.6 * u;
+          ctx.fillStyle = e.endo && u > 0.5 ? '#ff9a76' : q.col;
+          ctx.beginPath(); ctx.arc(x - cx, y - cy, r, 0, TAU); ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+          ctx.lineWidth = Math.max(8 * NM, px);
+          ctx.beginPath(); ctx.arc(x - cx, y - cy, r * 1.15, 0, TAU); ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'die': {
+          // The cell shrivels and its contents leak away.
+          const c = e.cell;
+          if (!this.inView(c.x, c.y, c.r * 3) || c.r * this.ppu < 1) break;
+          ctx.globalAlpha = 0.7 * (1 - u);
+          ctx.fillStyle = c.col;
+          ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, c.r * (1 - 0.45 * k), 0, TAU); ctx.fill();
+          ctx.fillStyle = 'rgba(170,130,90,1)';
+          for (let i = 0; i < 14; i++) { const a = i * 2.4 + c.id, rr = c.r * (0.5 + 1.6 * k); ctx.beginPath(); ctx.arc(c.x - cx + Math.cos(a) * rr, c.y - cy + Math.sin(a) * rr, Math.max(c.r * 0.06, px), 0, TAU); ctx.fill(); }
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'burst': {
+          // Lysis: the membrane tears into fragments flying outward.
+          const c = e.cell;
+          if (!this.inView(c.x, c.y, c.r * 4) || c.r * this.ppu < 1) break;
+          ctx.globalAlpha = 1 - u;
+          ctx.fillStyle = c.col;
+          ctx.globalAlpha = 0.4 * (1 - u);
+          ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, c.r * (1 + 0.4 * k), 0, TAU); ctx.fill();
+          ctx.globalAlpha = 1 - u;
+          ctx.strokeStyle = 'rgba(240,235,215,0.95)';
+          ctx.lineWidth = Math.max(DIM.bilayer * NM * 2, px);
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * TAU + c.id, rr = c.r * (1 + 1.6 * k);
+            ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, rr, a, a + 0.35 - 0.2 * k); ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'inject': {
+          // A virus docks on the membrane, its tail contracts, and its genome snakes inside.
+          const c = e.cell;
+          if (c.dead || !this.inView(c.x, c.y, c.r * 2)) break;
+          if (e.ox === undefined) { e.ox = e.x - c.x; e.oy = e.y - c.y; }
+          const d = Math.hypot(e.ox, e.oy) || 1, ux = e.ox / d, uy = e.oy / d;
+          const x = c.x + ux * (c.r + 0.25), y = c.y + uy * (c.r + 0.25);
+          if (DIM.virus * NM * this.ppu < 1.5) break;
+          this.drawVirus(x, y, Math.atan2(-uy, -ux) - Math.PI / 2);
+          ctx.strokeStyle = 'rgba(255,209,102,0.9)';
+          ctx.lineWidth = Math.max(DIM.dna * NM, 0.7 * px);
+          ctx.beginPath();
+          const len = c.r * 0.6 * k;
+          for (let s2 = 0; s2 <= 20; s2++) { const t2 = (s2 / 20) * len, w2 = Math.sin(t2 * 8) * 0.05; ctx.lineTo(c.x + ux * (c.r - t2) - uy * w2 - cx, c.y + uy * (c.r - t2) + ux * w2 - cy); }
+          ctx.stroke();
+          break;
+        }
+        case 'vsplit': break; // drawn underneath (drawFxUnder)
+        case 'vsplit-old': {
+          const a = e.a, b = e.b;
+          if (a.dead || b.dead || !this.inView(a.x, a.y, a.r * 3) || a.r * this.ppu < 2) break;
+          const w = Math.min(a.r, b.r) * 0.9 * (1 - k), dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
+          if (w <= 0) break;
+          ctx.strokeStyle = 'rgba(245,232,180,0.9)';
+          ctx.lineWidth = Math.max(DIM.bilayer * NM, px);
+          ctx.beginPath();
+          ctx.moveTo(a.x - cx + nx * w, a.y - cy + ny * w); ctx.lineTo(b.x - cx + nx * w, b.y - cy + ny * w);
+          ctx.moveTo(a.x - cx - nx * w, a.y - cy - ny * w); ctx.lineTo(b.x - cx - nx * w, b.y - cy - ny * w);
+          ctx.stroke();
+          break;
+        }
+        case 'vform': {
+          // Lipids drift together and close up into a bubble.
+          const v = e.v;
+          if (!this.inView(v.x, v.y, v.r * 3)) break;
+          ctx.fillStyle = MONO_COLORS[LIPID];
+          const h = Math.max(1 * NM, 0.8 * px);
+          e.pts.forEach(([x0, y0], i) => {
+            const a = (i / e.pts.length) * TAU, tx = v.x + Math.cos(a) * v.r, ty = v.y + Math.sin(a) * v.r;
+            ctx.fillRect(x0 + (tx - x0) * k - cx - h, y0 + (ty - y0) * k - cy - h, 2 * h, 2 * h);
+          });
+          break;
+        }
+        case 'abio': {
+          // A protocell becomes a living cell: a pulse of light as its machinery switches on.
+          const c = e.cell;
+          if (c.dead || !this.inView(c.x, c.y, c.r * 6)) break;
+          ctx.globalAlpha = 1 - u;
+          ctx.strokeStyle = '#ffe58a';
+          ctx.lineWidth = Math.max(c.r * 0.15, px * 2);
+          ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, c.r * (1 + 3 * k), 0, TAU); ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'join': {
+          // A nucleotide glides onto the end of the growing strand.
+          if (this.pxnm < 2.5) break;
+          const p = e.p;
+          if (p.dead || !this.inView(p._rx ?? p.x, p._ry ?? p.y, 0.05)) break;
+          const lay = this.layout(p), q = lay.pts[lay.pts.length - 1], ang = p._drawAng ?? p.ang;
+          const ex = (p._rx ?? p.x) + (q[0] * Math.cos(ang) - q[1] * Math.sin(ang)) * NM, ey = (p._ry ?? p.y) + (q[0] * Math.sin(ang) + q[1] * Math.cos(ang)) * NM;
+          const x = e.x + (ex - e.x) * k, y = e.y + (ey - e.y) * k;
+          if (this.inView(x, y, 3 * NM)) this.drawMonomer(x, y, e.b, ang + (1 - k) * 2);
+          break;
+        }
+      }
+    }
   }
 
   // Thermal jiggle (drawing only): a smooth few-tenths-of-a-nanometre wobble, so molecules look alive
@@ -698,7 +905,7 @@ export class Renderer {
         continue;
       }
       const fill = 0.35 + 0.65 * Math.max(0.15, Math.min(1, c.energy / c.cap));
-      ctx.globalAlpha = rp > 14 ? Math.max(0.85, fill) : fill; // close up, cytoplasm is opaque
+      ctx.globalAlpha = c._dividing ? 0 : rp > 14 ? Math.max(0.85, fill) : fill; // close up, cytoplasm is opaque
       ctx.fillStyle = col;
       if (this.bigDisk(X, Y, c.r)) ctx.fill();
       ctx.globalAlpha = 1;
@@ -718,7 +925,8 @@ export class Renderer {
           if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
         }
       }
-      if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
+      if (c._dividing) { /* outline belongs to the shared body while pinching */ }
+      else if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
       else if (rp > 3 || c.mito) {
         ctx.strokeStyle = c.mito ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)';
         ctx.lineWidth = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8));

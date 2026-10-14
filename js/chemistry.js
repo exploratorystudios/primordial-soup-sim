@@ -46,6 +46,7 @@ export class Soup {
   kill(j, by = null, why = '') {
     this.mdead[j] = 1;
     if (this.watchMid && this.mid[j] === this.watchMid) this.watchNext = { obj: by, why };
+    if (by && by.seq) this.world.emit('join', 10, { p: by, x: this.mx[j], y: this.my[j], b: this.mt[j] });
   }
 
   // Put a polymer inside a protocell (and remember where it lives).
@@ -220,6 +221,7 @@ export class Soup {
       if (c + 1 >= CFG.VES_NUCLEATE && this.vesicles.length < CFG.MAX_VESICLES * this.scale) {
         const nv = this.makeVesicle((sx + x) / (c + 1), (sy + y) / (c + 1), c + 1, 0);
         this.vesicles.push(nv);
+        this.world.emit('vform', 25, { v: nv, pts: [[x, y], ...nb.map((j) => [mx[j], my[j]])] });
         this.kill(i, nv, 'helped form a new membrane vesicle');
         for (const j of nb) this.kill(j, nv, 'helped form a new membrane vesicle');
         this.world.milestone('vesicle', 'Lipids self-assemble into the first membrane vesicle');
@@ -281,7 +283,9 @@ export class Soup {
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
             if (this.canAddPolymer()) {
-              this.newPolys.push(this.makePolymer(seq, p.x + rng.range(-3, 3), p.y + rng.range(-3, 3)));
+              const kid = this.makePolymer(seq, p.x + rng.range(-3, 3), p.y + rng.range(-3, 3));
+              this.newPolys.push(kid);
+              this.world.emit('peel', 20, { kid, x: p.x, y: p.y });
               w.milestone('replicator', 'A ribozyme copies itself: the RNA world begins');
             }
           }
@@ -386,6 +390,7 @@ export class Soup {
         for (const p of v.polys) if (p.act > 0) { active++; if (!best || p.act > best.act) best = p; }
         if (best && best.act >= CFG.CELL_ACT && active >= 2) {
           const cell = w.life.spawnFromProtocell(v, best);
+          w.emit('abio', 60, { cell, vr: v.r });
           v.dead = true; v.next = cell; v.nextWhy = 'became a living cell!';
           for (const q of v.polys) { q.dead = true; q.next = cell; q.nextWhy = q === best ? 'became the genome of the first cell in its lineage' : 'ended up inside a new living cell'; }
           continue;
@@ -463,6 +468,7 @@ export class Soup {
     // Follow the daughter that inherited more of the contents.
     v.dead = true;
     v.next = a.polys.length >= b.polys.length ? a : b;
+    this.world.emit('vsplit', 25, { a, b });
     v.nextWhy = 'divided in two; following the daughter with more RNA';
     for (let t = 0; t < 4; t++) { a.pool[t] = v.pool[t] >> 1; b.pool[t] = v.pool[t] - a.pool[t]; }
     a.copies = b.copies = v.copies; // replication history of the lineage

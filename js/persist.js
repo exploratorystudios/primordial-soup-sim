@@ -42,6 +42,7 @@ export function serialize(w) {
         species: c.species, origin: c.origin, parentId: c.parentId, bonds: c.bonds.map((o) => o.id), type: c.type, org: c.org, orgSize: c.orgSize,
         depth: c.depth, heading: c.heading, nut: c.nut, infected: c.infected, born: c.born, founderSeq: c.founderSeq, sexual: c.sexual,
         px: c.px, py: c.py, fx: c.fx, fy: c.fy, dirX: c.dirX, dirY: c.dirY, // sensed directions and current heading
+        r: c.r, rTarget: c.rTarget, endoT: c.endoT, mitoN: c.mitoN,
       })),
       species: [...L.species.values()].map((s) => ({ ...s, rep: b64(s.rep) })),
       organisms: L.organisms, stamp: L.stamp,

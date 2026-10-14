@@ -19,6 +19,7 @@ const TM = [
   [0, 0, 0, 0, 0, 1, 0.35],
 ];
 
+const snap = (c) => ({ x: c.x, y: c.y, r: c.r, col: c.trophColor, mito: c.mito, id: c.id });
 const GR = { x: 0, y: 0 };
 const CUR = { x: 0, y: 0 };
 
@@ -31,6 +32,7 @@ export class Cell {
     this.age = 0;
     this.gen = parent ? parent.gen + 1 : 0;
     this.mito = parent ? parent.mito : false;
+    this.endoT = parent ? parent.endoT : undefined;
     this.plastid = parent ? parent.plastid : false;
     this.species = parent ? parent.species : 0;
     this.origin = parent ? parent.origin : 0;
@@ -52,7 +54,9 @@ export class Cell {
 export function decode(c) {
   const g = c.g;
   // Radius in world units (0.5 µm): prokaryotes 1–3.5 µm across, eukaryotes 6–30 µm.
+  const rNow = c.r, growing = c.rTarget !== undefined;
   c.r = c.mito ? 6 + g[Gn.SIZE] * 24 : 1 + g[Gn.SIZE] * 2.5;
+  if (growing) { c.rTarget = c.r; c.r = Math.min(rNow, c.r); } // still growing toward its new size
   c.area = (c.r / 2) * (c.r / 2);        // relative to a 2 µm bacterium (collision mass)
   c.m = Math.pow(c.area, 0.75);          // metabolic size: Kleiber-like sublinear scaling
   c.transl = g[Gn.TRANSL];
@@ -115,7 +119,7 @@ export class Life {
     this.deaths = { starved: 0, eaten: 0, aged: 0, oxygen: 0, virus: 0, crowding: 0, impact: 0 };
     this.sexualBirths = 0;
     this.maxR = 1;
-    this.stats = { photo: 0, chemo: 0, hetero: 0, pred: 0, euk: 0, plastid: 0, aerobic: 0, inColonies: 0, multicellular: 0, complex: 0, largest: 0, maxGen: 0, speciesAlive: 0, multiSpecies: 0 };
+    this.stats = { photosynthesizers: 0, dnaCells: 0, proteinCells: 0, infected: 0, sexualBirths: 0, photo: 0, chemo: 0, hetero: 0, pred: 0, euk: 0, plastid: 0, aerobic: 0, inColonies: 0, multicellular: 0, complex: 0, largest: 0, maxGen: 0, speciesAlive: 0, multiSpecies: 0 };
   }
 
   redecode(c) { decode(c); }
@@ -184,9 +188,24 @@ export class Life {
     if (this.w.t % 10 === 0) this.updateOrganisms();
   }
 
+  // Apply a new radius and everything that scales with it.
+  resize(c) {
+    c.area = (c.r / 2) * (c.r / 2);
+    c.m = Math.pow(c.area, 0.75);
+    c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1);
+    c.nutNeed = c.m * CFG.NUT_PER_AREA * 2;
+  }
+
   live(c) {
     const w = this.w, F = w.fields, rng = w.rng, g = c.g, tm = TM[c.type];
     c.age++;
+    // After endosymbiosis the new organelle divides inside its host: one, then two, four...
+    if (c.endoT !== undefined) c.mitoN = Math.min(99, 1 + Math.floor((w.t - c.endoT) / 40));
+    if (c.rTarget !== undefined) {
+      c.r = Math.min(c.rTarget, c.r + 0.04); // ~0.02 µm per tick
+      this.resize(c);
+      if (c.r >= c.rTarget) c.rTarget = undefined;
+    }
     // Self-shading: light falls when neighbours cover much of the area around the cell.
     const sq = CFG.LIFE_HASH * CFG.LIFE_HASH;
     const shade = this.coverage[this.hash.cell(c.x, c.y)] - Math.min(Math.PI * c.r * c.r, sq) / sq;
@@ -320,8 +339,10 @@ export class Life {
     const g = Gn.mutate(base, rng, 1 - (1 - CFG.DNA_MUT) * c.dnaLevel);
     const ang = rng.next() * 6.283;
     const ca = Math.cos(ang), sa = Math.sin(ang);
-    const child = this.makeCell(c.x + ca * c.r * 0.6, c.y + sa * c.r * 0.6, g, c);
-    c.x -= ca * c.r * 0.4; c.y -= sa * c.r * 0.4;
+    // Binary fission: the two daughters end up side by side (the renderer animates the pinch).
+    const mx = c.x, my = c.y;
+    const child = this.makeCell(c.x + ca * c.r * 0.9, c.y + sa * c.r * 0.9, g, c);
+    c.x -= ca * c.r * 0.9; c.y -= sa * c.r * 0.9;
     const e = (c.energy - c.cap * CFG.DIV_COST) / 2;
     c.energy = e;
     child.energy = Math.min(e, child.cap);
@@ -341,6 +362,7 @@ export class Life {
     }
     child.sexual = sexual;
     this.newborns.push(child);
+    this.w.emit('divide', 30, { a: c, b: child, mx, my });
     this.births++;
   }
 
@@ -360,6 +382,7 @@ export class Life {
   kill(c, cause, eaten) {
     if (c.dead) return;
     c.dead = true;
+    if (!eaten) this.w.emit(cause === 'virus' ? 'burst' : 'die', cause === 'virus' ? 35 : 60, { cell: snap(c), cause });
     if (!c.nextWhy) c.nextWhy = { starved: 'starved', aged: 'died of old age', oxygen: 'was poisoned by oxygen', virus: 'burst, killed by viruses', crowding: 'died in a crowded patch', impact: 'was killed by the asteroid impact' }[cause] || 'died';
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
     if (!eaten) {
@@ -439,7 +462,10 @@ export class Life {
     if (!a.mito && a.dna && a.transl > 0.5 && b.aer > 0.5 && o2f > 0.15 && rng.next() < CFG.ENDO_P) {
       a.mito = true;
       b.endosymbiont = true;
+      a.endoT = this.w.t; // its mitochondria will multiply from this one
+      const r0 = a.r;
       decode(a);
+      a.rTarget = a.r; a.r = r0; this.resize(a); // grows into a eukaryote rather than popping
       a.species = this.newSpecies(a, a.species).id;
       this.species.get(a.species).euk = true;
       this.w.milestone('eukaryote', 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote');
@@ -453,6 +479,7 @@ export class Life {
     }
     b.next = a;
     b.nextWhy = b.endosymbiont ? `was swallowed by cell #${a.id} and lives on inside it as an organelle` : `was swallowed by cell #${a.id}`;
+    this.w.emit('engulf', 30, { pred: a, prey: snap(b), endo: !!b.endosymbiont });
     this.kill(b, 'eaten', true);
     return true;
   }

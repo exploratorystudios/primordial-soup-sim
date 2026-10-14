@@ -75,6 +75,9 @@ export class World {
     for (let i = 0; i < this.sunTable.length; i++) this.sunTable[i] = Math.exp((-CFG.LIGHT_DEPTH * i * 2) / CFG.H);
     this.sunScale = 0.5;
     this.smooth = false; // capture start-of-tick positions for smooth slow-motion rendering
+    // Visual events (division, engulfing, bursting...) so the renderer can play them out over time.
+    // Purely cosmetic: nothing in the simulation reads this.
+    this.fx = [];
     this.curX = new Float32Array(this.fields.n);
     this.curY = new Float32Array(this.fields.n);
     this.updateCurrents();
@@ -181,6 +184,7 @@ export class World {
       this.checkMilestones();
     }
     if (this.t % this.historyEvery === 0) this.record();
+    if (this.t % 20 === 0 && this.fx.length) this.fx = this.fx.filter((e) => this.t - e.t <= e.dur);
     this.tickEvents();
     this.t++;
   }
@@ -228,6 +232,12 @@ export class World {
       this.history = this.history.filter((_, i) => i % 2 === 0);
       this.historyEvery *= 2;
     }
+  }
+
+  // Record something worth animating. dur is in ticks.
+  emit(type, dur, data) {
+    if (this.fx.length > 4000) return;
+    this.fx.push({ type, t: this.t, dur, ...data });
   }
 
   // ----------------------------------------------------- smooth rendering

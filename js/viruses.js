@@ -68,6 +68,7 @@ export class Viruses {
             w.life.redecode(c);
           } else {
             v.nextWhy = `injected its genome into cell #${c.id}`;
+            w.emit('inject', 40, { cell: c, x: v.x, y: v.y });
             c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
             this.stats.infections++;
           }
