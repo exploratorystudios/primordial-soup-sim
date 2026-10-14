@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Primordial Soup · Film</title>
+  <style>
+    html, body { margin: 0; background: #000; overflow: hidden; }
+    canvas { display: block; width: 1920px; height: 1080px; }
+  </style>
+</head>
+<body>
+  <canvas id="film"></canvas>
+  <script type="module">
+    import { Cinema } from './js/cinema.js';
+    const seed = +new URLSearchParams(location.search).get('seed') || 11;
+    window.cinema = new Cinema(document.getElementById('film'), seed);
+    window.cinemaReady = true;
+  </script>
+</body>
+</html>

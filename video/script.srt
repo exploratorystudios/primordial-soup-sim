@@ -1,0 +1,148 @@
+1
+00:00:00,800 --> 00:00:04,983
+Four billion years ago, there was no life on Earth.
+
+2
+00:00:05,133 --> 00:00:07,150
+Only water, rock… and chemistry.
+
+3
+00:00:08,800 --> 00:00:12,517
+This is a simulation of how that changed.
+
+4
+00:00:12,667 --> 00:00:18,800
+We’re looking at a patch of ancient seafloor less than a millimetre wide,
+
+5
+00:00:18,950 --> 00:00:23,150
+where hydrothermal vents pump out heat and raw chemicals.
+
+6
+00:00:24,800 --> 00:00:27,804
+Everything here is drawn at its true size.
+
+7
+00:00:27,954 --> 00:00:32,535
+Zoom in tens of thousands of times, and those specks become molecules:
+
+8
+00:00:32,685 --> 00:00:37,660
+nucleotides, each a phosphate, a sugar and a base, about a nanometre across.
+
+9
+00:00:37,810 --> 00:00:40,813
+On warm mineral surfaces, they link into chains.
+
+10
+00:00:40,963 --> 00:00:45,150
+This is RNA, the molecule that may have started it all.
+
+11
+00:00:46,800 --> 00:00:50,576
+Some chains fold into shapes that do something remarkable:
+
+12
+00:00:50,726 --> 00:00:55,373
+they copy themselves, letter by letter, from the nucleotides around them.
+
+13
+00:00:55,523 --> 00:00:59,299
+The copies aren’t perfect, so the best copiers win.
+
+14
+00:00:59,449 --> 00:01:04,097
+Meanwhile, fatty molecules gather into bubbles that trap these replicators inside.
+
+15
+00:01:04,247 --> 00:01:07,150
+A protocell: heredity, wrapped in a membrane.
+
+16
+00:01:08,800 --> 00:01:14,322
+When a protocell lineage keeps growing, dividing and copying its genes,
+
+17
+00:01:14,472 --> 00:01:19,994
+it becomes something new: a living cell, a few micrometres across,
+
+18
+00:01:20,144 --> 00:01:25,150
+with ribosomes building proteins, and a chromosome carrying its genes.
+
+19
+00:01:26,800 --> 00:01:28,650
+Now, time speeds up.
+
+20
+00:01:28,800 --> 00:01:35,650
+Every division copies the genome with occasional mistakes, and natural selection does the rest.
+
+21
+00:01:35,800 --> 00:01:37,650
+Lineages split into species.
+
+22
+00:01:37,800 --> 00:01:42,650
+Some learn to harvest sunlight, flooding the ocean with oxygen:
+
+23
+00:01:42,800 --> 00:01:48,150
+a poison to the old world, and fuel for the new.
+
+24
+00:01:48,300 --> 00:01:51,150
+Others learn to eat each other.
+
+25
+00:01:52,800 --> 00:01:54,500
+Then, a lucky accident.
+
+26
+00:01:54,650 --> 00:01:59,125
+A cell swallows an oxygen-breathing bacterium… and doesn’t digest it.
+
+27
+00:01:59,275 --> 00:02:03,750
+It becomes a mitochondrion, a power plant inside the cell.
+
+28
+00:02:03,900 --> 00:02:11,150
+This is a eukaryote: bigger, with a nucleus, and the ancestor of every plant and animal.
+
+29
+00:02:12,800 --> 00:02:16,911
+Some cells stop drifting apart after they divide.
+
+30
+00:02:17,061 --> 00:02:24,900
+Stuck together, they share food and protection, and something new appears: a division of labour.
+
+31
+00:02:25,050 --> 00:02:28,628
+Cells take on jobs: feeding, defending, moving.
+
+32
+00:02:28,778 --> 00:02:35,020
+A few become a germline, budding off to start the next generation.
+
+33
+00:02:35,170 --> 00:02:37,150
+Many cells… one organism.
+
+34
+00:02:38,800 --> 00:02:40,772
+Nothing in this story was scripted.
+
+35
+00:02:40,922 --> 00:02:45,370
+Every step emerged from the one before it: chemistry, then heredity, then evolution.
+
+36
+00:02:45,520 --> 00:02:49,613
+This is the tree of life that grew in this one world.
+
+37
+00:02:49,763 --> 00:02:53,150
+Start a new one, and history unfolds differently every time.
+

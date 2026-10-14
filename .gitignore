@@ -1,0 +1,5 @@
+node_modules/
+video/preview/
+# Rendered output is large and reproducible: node render-video.mjs --seed 21
+video/*.mp4
+.DS_Store

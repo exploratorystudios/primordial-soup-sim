@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Primordial Soup</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <main id="stage">
+      <canvas id="world"></canvas>
+      <div id="era-banner">
+        <div id="era-name">Hadean Ocean</div>
+        <div id="era-desc"></div>
+      </div>
+      <div id="toast-area"></div>
+      <div id="hint">Scroll to zoom from the habitat down to single molecules · drag to pan · click to inspect (double-click to follow) · Space pauses</div>
+    </main>
+
+    <aside id="panel">
+      <header>
+        <h1>Primordial Soup</h1>
+        <div id="clock">tick 0</div>
+      </header>
+
+      <section class="controls">
+        <div class="row">
+          <button id="btn-play" title="Space">Pause</button>
+          <button id="btn-step" title="Advance one tick">Step</button>
+          <button id="btn-fit" title="Reset camera">Fit</button>
+        </div>
+        <label class="row">Speed <input id="speed" type="range" min="0" max="8" value="3"><span id="speed-val"></span></label>
+        <div class="row">
+          <label>Seed <input id="seed" type="number" value="1" min="1"></label>
+          <button id="btn-new">New world</button>
+        </div>
+      </section>
+
+      <section class="view">
+        <h2>View</h2>
+        <label class="row">Colour cells by
+          <select id="color-mode">
+            <option value="troph">Metabolism</option>
+            <option value="species">Species / lineage</option>
+            <option value="type">Cell type</option>
+          </select>
+        </label>
+        <label class="row">Overlay
+          <select id="overlay">
+            <option value="none">None</option>
+            <option value="chem">Vent chemicals</option>
+            <option value="organic">Organic matter</option>
+            <option value="oxygen">Oxygen</option>
+            <option value="nutrient">Nutrients</option>
+          </select>
+        </label>
+        <label class="check"><input id="show-chem" type="checkbox" checked> Show prebiotic chemistry</label>
+        <div class="zoom-presets">
+          <span class="muted">Zoom to</span>
+          <button data-fov="0" title="Whole habitat, 0.7 mm">Habitat</button>
+          <button data-fov="120000" title="120 µm field: colonies and organisms">Organism</button>
+          <button data-fov="15000" title="15 µm field: single cells">Cell</button>
+          <button data-fov="1500" title="1.5 µm field: organelles, ribosomes, DNA">Interior</button>
+          <button data-fov="150" title="150 nm field: membrane bilayers">Membrane</button>
+          <button data-fov="15" title="15 nm field: individual molecules">Molecule</button>
+        </div>
+        <p class="muted small">Everything is drawn at true size (habitat 0.7 × 0.45 mm). Select something first and the preset zooms into it.</p>
+      </section>
+
+      <section class="events">
+        <h2>Planetary events</h2>
+        <div class="row">
+          <button id="ev-meteor" title="Mass extinction">Asteroid</button>
+          <button id="ev-snowball" title="Global glaciation">Snowball Earth</button>
+          <button id="ev-volcano" title="Vent surge">Volcanism</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Census</h2>
+        <dl id="stats"></dl>
+      </section>
+
+      <section>
+        <h2>Populations <span class="sub">(log scale)</span></h2>
+        <canvas id="chart" height="150"></canvas>
+        <div id="chart-legend" class="legend"></div>
+        <button id="btn-tree" class="wide">Tree of life</button>
+      </section>
+
+      <section>
+        <h2>Milestones</h2>
+        <ol id="milestones"></ol>
+      </section>
+
+      <section id="inspector-section">
+        <h2>Inspector</h2>
+        <div id="inspector"><p class="muted">Click a cell, vesicle or polymer.</p></div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="tree-modal" hidden>
+    <div class="modal-inner">
+      <header>
+        <h2>Tree of life</h2>
+        <span class="muted">Species with a peak population of 5+. Thickness shows peak size; ★ marks eukaryotes, ◆ multicellular lineages.</span>
+        <button id="tree-close">Close</button>
+      </header>
+      <canvas id="tree"></canvas>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "primordial-soup",
+  "version": "0.1.0",
+  "description": "From prebiotic chemistry to multicellular organisms: an evolution simulation",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "headless": "node headless.js"
+  }
+}
