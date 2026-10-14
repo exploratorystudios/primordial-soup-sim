@@ -91,13 +91,14 @@ vents spans hundreds of metres, compressed here into 0.9 mm) and time. Era banne
 ### Inspecting parts
 
 Select anything and the inspector shows its **breadcrumb path** (e.g. *Organism › Cell › Nucleus ›
-Chromosomes › Gene*) and a **Parts** list. Clicking a part selects it and flies the camera to it at a
-fitting magnification. When zoomed in, clicking on the canvas picks the deepest visible part:
+Chromosomes › Gene*) and a **Parts** list. Clicking a part in the list selects it and flies the camera there, framed to fit, then follows it. When zoomed in, clicking on the canvas picks the deepest visible part:
 an organelle, a ribosome, a lipid in the membrane, one nucleotide in an RNA strand, or a chemical group
 of a molecule.
 
 - **Organism** → its cells grouped by fate
-- **Cell** → membrane (→ phospholipid → head / glycerol / tails), cell wall, cytoplasm, chromosome (→ every gene with its value), nucleus (→ envelope & pores, nucleolus), ribosomes (→ subunits), mitochondria (→ membranes, matrix, mtDNA), chloroplasts (→ grana, stroma, cpDNA), flagellum (→ motor, hook, filament), ER, thylakoids, junctions to neighbour cells
+- **Cell** → membrane (→ phospholipids and membrane proteins: channels, pumps, transporters, receptors, ATP synthase), cell wall, cytoplasm, chromosome (→ base pairs up close, or every gene with its value), ribosomes (→ subunits), flagellum, junctions to neighbour cells, assembling virus capsids if infected
+  - *prokaryotes* add plasmids, pili, storage granules, carboxysomes, thylakoids
+  - *eukaryotes* add the nucleus (→ envelope, individual pores, nucleolus, chromatin → nucleosomes → histones), rough ER (→ bound ribosomes), Golgi (→ cisternae, transport vesicles), centrosome (→ centrioles), microtubules (→ tubulin dimers), lysosomes, peroxisomes, mitochondria (→ outer membrane, cristae → ATP synthase, mtDNA, matrix), and in algae chloroplasts (→ grana → thylakoid discs → photosystems I and II, cpDNA, stroma) and a central vacuole
 - **Protocell** → fatty-acid membrane (→ fatty acid), every RNA strand inside, its nucleotide pool
 - **RNA strand** → every nucleotide (→ phosphate, ribose, base), hairpin stem, daughter strand being copied
 - **Free molecule** → its chemical groups
