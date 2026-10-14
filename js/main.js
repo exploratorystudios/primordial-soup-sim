@@ -79,8 +79,11 @@ function frameStep() {
   tour.update(dt);
   world.beginInterp(alpha);
   opts.time = world.t - 1 + alpha;
+  renderer.time = opts.time;
   const sel = ui.selected;
   if (sel) trackSelection(sel);
+  // A strand inside a protocell: place it for this frame before aiming the camera at it.
+  for (let q = sel; q; q = q.parent) if (q.kind === 'polymer' && q.obj.home && !q.obj.home.dead) renderer.placeInternal(q.obj, q.obj.home);
   opts.selected = sel && !sel.gone ? sel.obj : null;
   if (sel && sel.follow && !sel.gone) {
     const o = sel.offset || { x: 0, y: 0 };

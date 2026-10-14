@@ -345,7 +345,7 @@ export class Renderer {
 
     for (const p of soup.polymers) {
       if (!this.inView(p.x, p.y, p.seq.length * DIM.ntRise * NM)) continue;
-      this.drawPolymer(p, p.x, p.y, p.ang);
+      this.drawPolymer(p, p.x, p.y, this.freeAngle(p));
     }
 
     for (const ve of soup.vesicles) {
@@ -458,6 +458,27 @@ export class Renderer {
     return p._lay;
   }
 
+  // Where a strand inside a protocell is right now. It wanders gently as a function of simulation
+  // time only, and main.js calls this before aiming the camera so following it is steady.
+  placeInternal(p, ve) {
+    if (p._fx === undefined) {
+      const a = Math.random() * TAU, rr = Math.sqrt(Math.random()) * 0.8;
+      p._fx = Math.cos(a) * rr; p._fy = Math.sin(a) * rr; p._fa = Math.random() * TAU; p._ph = Math.random() * TAU;
+    }
+    const inner = ve.r - DIM.bilayer * NM, t = this.time, w = (2 * NM) / inner;
+    const fx = p._fx + Math.sin(t * 0.031 + p._ph) * w, fy = p._fy + Math.cos(t * 0.027 + p._ph * 1.7) * w;
+    p._drawFa = p._fa + Math.sin(t * 0.013 + p._ph) * 0.6;
+    p.x = ve.x + fx * inner; p.y = ve.y + fy * inner;
+  }
+
+  // Free strands turn slowly and smoothly on screen (the simulation's Brownian angle jumps every tick
+  // and is not used for anything physical).
+  freeAngle(p) {
+    if (p._ph === undefined) p._ph = Math.random() * TAU;
+    const t = this.time;
+    return p._ph + Math.sin(t * 0.011 + p._ph) * 1.5 + t * 0.004;
+  }
+
   drawPolymer(p, x, y, ang) {
     const ctx = this.ctx, lay = this.layout(p), seq = p.seq;
     p._drawAng = ang;
@@ -543,17 +564,8 @@ export class Renderer {
     // Contents, at true size inside the membrane.
     const inner = ve.r - DIM.bilayer * NM;
     for (const p of ve.polys) {
-      if (p._fx === undefined) {
-        const a = Math.random() * TAU, rr = Math.sqrt(Math.random()) * 0.8;
-        p._fx = Math.cos(a) * rr; p._fy = Math.sin(a) * rr; p._fa = Math.random() * TAU; p._ph = Math.random() * TAU;
-      }
-      // Gentle wandering that depends only on simulation time, so it freezes when paused.
-      const t = this.time, w = (2 * NM) / inner;
-      const fx = p._fx + Math.sin(t * 0.031 + p._ph) * w, fy = p._fy + Math.cos(t * 0.027 + p._ph * 1.7) * w;
-      p._drawFa = p._fa + Math.sin(t * 0.013 + p._ph) * 0.6;
-      const px = ve.x + fx * inner, py = ve.y + fy * inner;
-      p.x = px; p.y = py; // keep the inspector/camera on it
-      if (this.inView(px, py, 0.05)) this.drawPolymer(p, px, py, p._drawFa);
+      this.placeInternal(p, ve);
+      if (this.inView(p.x, p.y, 0.05)) this.drawPolymer(p, p.x, p.y, p._drawFa);
     }
     if (molecular) {
       // Free nucleotides waiting in the protocell's internal pool.

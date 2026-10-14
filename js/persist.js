@@ -73,6 +73,7 @@ export function deserialize(d) {
   soup.polymers = S.polymers.map(polyIn);
   soup.vesicles = S.vesicles.map((v) => ({ ...soup.makeVesicle(v.x, v.y, v.L, v.gen), id: v.id, copies: v.copies, age: v.age, pool: v.pool, polys: v.polys.map(polyIn) }));
   soup.vesId = S.vesId; // after makeVesicle, which advances the counter
+  for (const v of soup.vesicles) for (const p of v.polys) p.home = v;
 
   const L = w.life, D = d.life;
   Object.assign(L, { nextId: D.nextId, nextSpecies: D.nextSpecies, origins: D.origins, births: D.births, deaths: D.deaths, sexualBirths: D.sexualBirths, stats: D.stats });
