@@ -46,7 +46,7 @@ const GENE_DESC = {
 const DIFF_INPUTS = ['bias', 'number of neighbours', 'distance from founder cell', 'colony size', 'light'];
 
 // ------------------------------------------------------------------ helpers
-export function sel(kind, obj, extra = {}) { return { kind, obj, follow: true, ...extra }; }
+export function sel(kind, obj, extra = {}) { return { kind, obj, follow: false, ...extra }; } // the camera's follow setting is applied on the next frame
 
 // A point that moves with its parent; pos() returns {x, y} in world units.
 function anchored(pos, r, isDead) {

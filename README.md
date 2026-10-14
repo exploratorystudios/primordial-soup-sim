@@ -50,7 +50,7 @@ narration in `video/make-script.mjs` together, then regenerate the script so the
 
 - **Scroll** zoom (habitat → single molecules) · **drag** pan
 - **Click** selects the outermost thing under the cursor (an organism, protocell, strand, molecule or virus). **Click again inside the selection** to select the part under the cursor, one level deeper; click inside a parent to pick a sibling; click outside to start over. **Esc** goes up a level. Clicking never moves the camera.
-- **F** (or the inspector's Follow button) locks the camera onto the selection, so it stays still in the middle of the screen however it moves. Following stays on until you press F or the button again: dragging just nudges the view (it glides back to centre), and whatever you select next is followed too
+- **F** (or the inspector's Follow button) locks the camera onto the selection, so it stays still in the middle of the screen however it moves. Following stays on until you press F or the button again: drag to place it anywhere on screen and it keeps following from there (zooming keeps it in that spot), and whatever you select next is followed too
 - **Space** pause · **+ / -** speed. At speeds below one tick per frame, motion is smoothly interpolated between ticks; paused means truly frozen.
 - **⏭ Next milestone** runs at full speed until something new happens · **Tour** flies the camera through what exists in this world, with captions
 - **Save world / Load world** write and resume a compressed `.json.gz` snapshot; a resumed world continues exactly as the original would have

@@ -208,7 +208,7 @@ canvas.addEventListener('pointermove', (e) => {
     flight = null;
     canvas.classList.add('dragging');
     renderer.pan(dx, dy);
-    reframe(); // while following, dragging just shifts where the subject sits on screen
+    reframe(); // while following, dragging moves where the subject sits on screen, and it stays there
   }
   drag.x = e.clientX; drag.y = e.clientY;
 });
@@ -278,15 +278,18 @@ function startFollow(sel) {
   let c = t;
   try { c = centreOf(sel); } catch { /* parts without a centre are followed by their body */ }
   sel.offset = { x: c.x - t.x, y: c.y - t.y };
-  sel.pan = { x: renderer.cam.x - c.x, y: renderer.cam.y - c.y };
+  const v = viewW();
+  sel.pan = { x: (renderer.cam.x - c.x) / v, y: (renderer.cam.y - c.y) / v, hold: false }; // glides into the centre
 }
 
 function chase(sel, dt) {
   const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 }, p = sel.pan || (sel.pan = { x: 0, y: 0 });
-  if (!(drag && drag.moved > 4)) { const k = Math.exp(-dt / 0.35); p.x *= k; p.y *= k; } // ease back to centre
-  renderer.cam.x = t.x + o.x + p.x;
-  renderer.cam.y = t.y + o.y + p.y;
+  if (!p.hold) { const k = Math.exp(-dt / 0.35); p.x *= k; p.y *= k; } // ease into the centre
+  const v = viewW(); // the pan is a fraction of the view, so zooming keeps the subject where it is on screen
+  renderer.cam.x = t.x + o.x + p.x * v;
+  renderer.cam.y = t.y + o.y + p.y * v;
 }
+function viewW() { return renderer.fieldWidthNm() / NM_PER_UNIT; }
 
 function kindOf(o) {
   if (o instanceof Cell) return 'cell';
@@ -370,20 +373,21 @@ let followOn = false;
 function toggleFollow() {
   const s = ui.selected;
   if (!s || s.gone) return;
-  followOn = s.follow = !s.follow;
+  followOn = s.follow = !followOn;
   // Keep the object where it is on screen instead of snapping it to the centre.
   if (s.follow) startFollow(s);
   ui.lastHTML = null;
 }
 ui.onFollow = toggleFollow;
 
-// Keep the current view as the following framing (after a drag or Fit).
+// Keep the current view as the following framing (after a drag or Fit): following carries on from there.
 function reframe() {
   const s = ui.selected;
   if (!s || s.gone || !s.follow) return;
   const t = followTarget(s);
   const o = s.offset || { x: 0, y: 0 };
-  s.pan = { x: renderer.cam.x - t.x - o.x, y: renderer.cam.y - t.y - o.y };
+  const v = viewW();
+  s.pan = { x: (renderer.cam.x - t.x - o.x) / v, y: (renderer.cam.y - t.y - o.y) / v, hold: true }; // stays where you put it
 }
 
 // Up one level (inspector button or Esc); keeps following and keeps the view steady.
