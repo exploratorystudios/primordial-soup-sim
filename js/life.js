@@ -339,10 +339,9 @@ export class Life {
     const g = Gn.mutate(base, rng, 1 - (1 - CFG.DNA_MUT) * c.dnaLevel);
     const ang = rng.next() * 6.283;
     const ca = Math.cos(ang), sa = Math.sin(ang);
-    // Binary fission: the two daughters end up side by side (the renderer animates the pinch).
-    const mx = c.x, my = c.y;
-    const child = this.makeCell(c.x + ca * c.r * 0.9, c.y + sa * c.r * 0.9, g, c);
-    c.x -= ca * c.r * 0.9; c.y -= sa * c.r * 0.9;
+    const child = this.makeCell(c.x + ca * c.r * 0.6, c.y + sa * c.r * 0.6, g, c);
+    c.x -= ca * c.r * 0.4; c.y -= sa * c.r * 0.4;
+    const mx = (c.x + child.x) / 2, my = (c.y + child.y) / 2; // where the renderer starts the pinch
     const e = (c.energy - c.cap * CFG.DIV_COST) / 2;
     c.energy = e;
     child.energy = Math.min(e, child.cap);

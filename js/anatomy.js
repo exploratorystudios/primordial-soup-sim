@@ -147,21 +147,55 @@ export function golgiCisternae(c, a) {
   }
   return out;
 }
-export function golgiVesicles(c, a) {
+// Transport vesicles bud from the trans face and travel out to the cell membrane, where they fuse.
+export function golgiVesicles(c, a, t = 0) {
   const g = a.golgi, p = at(c, g.fx, g.fy), len = Math.min(2.4, c.r * 0.3), out = [];
   const nx = Math.cos(g.ang), ny = Math.sin(g.ang), tx = -ny, ty = nx;
   for (let k = 0; k < 6; k++) {
-    const u = (k / 5 - 0.5) * 0.9, off = ((g.n + 1) / 2) * 70 * NM + 50 * NM + (k % 2) * 40 * NM;
-    out.push({ x: p.x + nx * off + tx * u * len, y: p.y + ny * off + ty * u * len, r: 30 * NM });
+    const u = (k / 5 - 0.5) * 0.9, off = ((g.n + 1) / 2) * 70 * NM + 50 * NM;
+    const sx = p.x + nx * off + tx * u * len, sy = p.y + ny * off + ty * u * len;
+    const ang = g.ang + (k - 2.5) * 0.22, ex = c.x + Math.cos(ang) * c.r * 0.97, ey = c.y + Math.sin(ang) * c.r * 0.97;
+    const f = (t * 0.004 + k / 6) % 1, e = f * f * (3 - 2 * f);
+    out.push({ x: sx + (ex - sx) * e, y: sy + (ey - sy) * e, r: 30 * NM, f });
   }
   return out;
 }
 
-export function microtubules(c, a) {
+// Gene expression and genome copying, as functions of simulation time and the cell's state.
+export function hash32(a, b = 0) {
+  let h = Math.imul(a + 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 1, 0xc2b2ae35);
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
+  return h >>> 0;
+}
+// Fraction of its genome a cell has copied: replication runs as it builds up toward dividing.
+export function replicationProgress(c) {
+  const f = c.energy / c.cap, start = c.divFrac * 0.55;
+  return Math.max(0, Math.min(1, (f - start) / (c.divFrac - start)));
+}
+// RNA polymerases transcribing genes: where each is along the chromosome path, and how much RNA it has made.
+export const GENE_LEN = 70; // path points per gene
+export function polymerases(c, nPts, t) {
+  const out = [], n = 2 + Math.round(c.transl * 4), act = 0.3 + 0.7 * Math.max(0, Math.min(1, c.energy / c.cap));
+  for (let k = 0; k < n; k++) {
+    const g0 = hash32(c.id, k) % nPts, cycle = GENE_LEN + 40, speed = 0.12 * act * (0.6 + (hash32(c.id, k + 50) % 100) / 200);
+    const prog = (t * speed + (hash32(c.id, k + 99) % cycle)) % cycle;
+    out.push({ k, g0, prog, done: prog > GENE_LEN, idx: (g0 + Math.min(prog, GENE_LEN)) % nPts });
+  }
+  return out;
+}
+// Codons a ribosome has read: it ratchets one codon at a time, faster in a busy, well-fed cell.
+export function translationPhase(c, seed, t) {
+  const rate = 0.03 * (0.3 + 0.7 * c.transl) * (0.3 + 0.7 * Math.max(0, Math.min(1, c.energy / c.cap)));
+  return t * rate + (seed % 97) / 97;
+}
+
+// Microtubules grow and shrink at their tips all the time (dynamic instability).
+export function microtubules(c, a, t = 0) {
   const o = at(c, a.centro.fx, a.centro.fy);
-  return a.mts.map((m) => {
+  return a.mts.map((m, k) => {
     const ex = c.x + Math.cos(m.ang) * c.r * 0.9, ey = c.y + Math.sin(m.ang) * c.r * 0.9;
-    return { x1: o.x, y1: o.y, x2: o.x + (ex - o.x) * m.len * 1.4, y2: o.y + (ey - o.y) * m.len * 1.4 };
+    const f = m.len * 1.4 * (0.78 + 0.22 * Math.sin(t * 0.017 + k * 1.7));
+    return { x1: o.x, y1: o.y, x2: o.x + (ex - o.x) * f, y2: o.y + (ey - o.y) * f };
   });
 }
 

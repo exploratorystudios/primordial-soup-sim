@@ -103,6 +103,16 @@ of a molecule.
 - **RNA strand** → every nucleotide (→ phosphate, ribose, base), hairpin stem, daughter strand being copied
 - **Free molecule** → its chemical groups
 
+### Animated processes
+
+Nothing pops into existence. Events in the simulation play out over a few dozen ticks of simulation
+time, so they freeze when paused and can be watched slowly at low speed:
+
+- **Events:** cells divide by binary fission (one body pinching into two), predators engulf prey into a food vacuole, dying cells shrivel and leak, viruses dock and inject their genome, infected cells burst into membrane fragments, lipids gather into vesicles, vesicles pinch in two, protocells flash as they come alive, nucleotides glide onto growing strands, and finished RNA copies peel away from their templates. A new eukaryote grows to full size gradually, and its mitochondria multiply from the single engulfed one.
+- **Inside cells, all the time:** RNA polymerases crawl along genes spinning out messenger RNA (in bacteria, ribosomes ride the message while it is still being made); as a cell builds up toward dividing, two replication forks copy its chromosome, with the new double helix running beside the old one; every ribosome runs the elongation cycle (a tRNA docks in the A site, the chain is handed over, the mRNA ratchets one codon, the empty tRNA leaves, and the protein grows); microtubules grow and shrink; transport vesicles travel from the Golgi to the membrane and fuse with it; ATP synthase rotors spin; membrane lipids jiggle.
+
+These run faster in well-fed cells and in cells with more translation machinery. They are drawn from each cell's state rather than simulated molecule by molecule (an exact simulation of a cell's chemistry is far beyond a browser), so they never change the outcome of a run.
+
 ## What is modelled
 
 ### 1. Prebiotic chemistry (`js/chemistry.js`)

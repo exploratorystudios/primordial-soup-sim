@@ -82,3 +82,19 @@ export function ribosomeAngle(seed) {
   let h = Math.imul(seed + 7, 0x9e3779b9); h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13;
   return ((h >>> 0) / 4294967296) * TAU;
 }
+
+// The elongation cycle at phase T (one unit per codon): the A-site tRNA arrives, the chain is
+// handed over, then everything translocates one codon and the empty tRNA leaves from the E site.
+export function translationState(m, T) {
+  const step = Math.floor(T), u = T - step, sp = 2.7 * m.s;
+  const shift = u > 0.6 ? ((u - 0.6) / 0.4) : 0; // translocation
+  const e = shift * shift * (3 - 2 * shift);
+  const trna = m.trna.map((t, i) => {
+    let dx = -e * sp, alpha = 1, dy = 0;
+    if (t.site === 'A' && u < 0.3) { const a = u / 0.3; dy = (1 - a) * 6 * m.s; dx += (1 - a) * 4 * m.s; alpha = a; } // arriving
+    if (t.site === 'E') { alpha = 1 - e; dy = e * 5 * m.s; dx -= e * 3 * m.s; } // leaving
+    return { ...t, dx, dy, alpha, aaHere: t.site === 'A' ? u < 0.45 : t.site === 'P' };
+  });
+  const len = Math.min(m.peptide.length, 8 + (step % Math.max(1, m.peptide.length - 8)));
+  return { step, u, shift: e * sp, codonShift: step * 3, trna, peptideLen: len };
+}

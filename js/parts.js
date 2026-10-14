@@ -370,7 +370,7 @@ function cellParts(s, world, renderer) {
         title: `Golgi cisterna (${cis.face} face)`, kv: [['Thickness', '≈ 30 nm']],
         desc: cis.face === 'cis' ? 'Receives cargo from the ER.' : cis.face === 'trans' ? 'Ships finished proteins out in vesicles.' : 'Adds and trims sugar chains on proteins passing through.',
       }, { parent: gl, shape: { w: 30 * NM, lines: () => [golgiCisternae(c, a)[cis.i].pts] } })),
-      ...golgiVesicles(c, a).map((v, k) => part(`Transport vesicle ${k + 1}`, anchored(() => golgiVesicles(c, a)[k], 30 * NM, dead), {
+      ...golgiVesicles(c, a, renderer.time ?? 0).map((v, k) => part(`Transport vesicle ${k + 1}`, anchored(() => golgiVesicles(c, a, renderer.time ?? 0)[k], 30 * NM, dead), {
         title: 'Transport vesicle', kv: [['Diameter', '≈ 60 nm']], desc: 'A tiny membrane bubble carrying cargo to the cell surface or to lysosomes.',
       }, { parent: gl })),
     ];
@@ -390,11 +390,11 @@ function cellParts(s, world, renderer) {
       title: 'Microtubules', kv: [['Diameter', '25 nm'], ['Drawn', String(a.mts.length)]],
       desc: 'Hollow tubes of tubulin radiating from the centrosome: tracks along which motor proteins haul organelles and vesicles.',
     }, { parent: s, group: true, note: `×${a.mts.length}` });
-    mtg.kids = () => microtubules(c, a).map((m, k) => {
-      const mt = part(`Microtubule ${k + 1}`, anchored(() => { const q = microtubules(c, a)[k]; return { x: (q.x1 + q.x2) / 2, y: (q.y1 + q.y2) / 2 }; }, 12 * NM, dead), {
+    mtg.kids = () => microtubules(c, a, renderer.time ?? 0).map((m, k) => {
+      const mt = part(`Microtubule ${k + 1}`, anchored(() => { const q = microtubules(c, a, renderer.time ?? 0)[k]; return { x: (q.x1 + q.x2) / 2, y: (q.y1 + q.y2) / 2 }; }, 12 * NM, dead), {
         title: 'Microtubule', kv: [['Diameter', '25 nm'], ['Built from', 'α/β-tubulin dimers, 13 protofilaments']],
         desc: 'Grows and shrinks at its tip all the time (dynamic instability), letting the cell remodel its skeleton within minutes.',
-      }, { parent: mtg, shape: { w: 25 * NM, lines: () => { const q = microtubules(c, a)[k]; return [[{ x: q.x1, y: q.y1 }, { x: q.x2, y: q.y2 }]]; } }, mtOf: { c, k } });
+      }, { parent: mtg, shape: { w: 25 * NM, lines: () => { const q = microtubules(c, a, renderer.time ?? 0)[k]; return [[{ x: q.x1, y: q.y1 }, { x: q.x2, y: q.y2 }]]; } }, mtOf: { c, k } });
       return mt;
     });
     out.push(mtg);
@@ -1104,7 +1104,7 @@ export function childAt(s, p, tol, world, renderer) {
     }
     if (s.mtOf) {
       if (8 * NM * renderer.ppu < 3) return null;
-      const { c, k } = s.mtOf, m = microtubules(c, c._anat)[k];
+      const { c, k } = s.mtOf, m = microtubules(c, c._anat, renderer.time ?? 0)[k];
       const L = Math.hypot(m.x2 - m.x1, m.y2 - m.y1), t = Math.max(0, Math.min(1, ((p.x - m.x1) * (m.x2 - m.x1) + (p.y - m.y1) * (m.y2 - m.y1)) / (L * L)));
       const pos = { x: m.x1 + (m.x2 - m.x1) * t, y: m.y1 + (m.y2 - m.y1) * t };
       return out(part('α/β-tubulin dimer', anchored(() => pos, 4 * NM, () => c.dead), {
