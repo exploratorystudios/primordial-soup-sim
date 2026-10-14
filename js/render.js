@@ -491,10 +491,15 @@ export class Renderer {
     this.fxNow = [];
     for (const e of world.fx) {
       const u = (this.time - e.t) / e.dur;
-      if (u < 0 || u > 1) { if (e.type === 'peel' && e.kid._peel === e) e.kid._peel = null; continue; }
+      if (u < 0 || u > 1) {
+        if (e.type === 'peel' && e.kid._peel === e) e.kid._peel = null;
+        if (e.type === 'copy' && e.p._copyFx === e) e.p._copyFx = null;
+        continue;
+      }
       e.u = u;
       this.fxNow.push(e);
       if (e.type === 'peel') e.kid._peel = e;
+      if (e.type === 'copy') e.p._copyFx = e;
     }
   }
 
@@ -748,8 +753,16 @@ export class Renderer {
     if (p.copy && p.prog > 0) {
       for (let i = 0; i < p.prog && i < pts.length; i++) {
         const [qx, qy, dx, dy] = pts[i];
+        let tx = qx - dx * 0.45, ty = qy - dy * 0.45;
+        const f = p._copyFx;
+        if (f && f.i === i) {
+          // The newest nucleotide glides in from where it was and pairs with the template.
+          const k = ease(f.u), wx = (f.x - x) / NM, wy = (f.y - y) / NM, ca = Math.cos(-ang), sa = Math.sin(-ang);
+          const lx = wx * ca - wy * sa, ly = wx * sa + wy * ca;
+          tx = lx + (tx - lx) * k; ty = ly + (ty - ly) * k;
+        }
         ctx.save();
-        ctx.translate(qx - dx * 0.45, qy - dy * 0.45);
+        ctx.translate(tx, ty);
         ctx.rotate(Math.atan2(-dy, -dx) - Math.PI / 2);
         this.nucleotideShape(p.copy[i], 0.55);
         ctx.restore();
@@ -1266,7 +1279,7 @@ export class Renderer {
           const D = Math.hypot(x1 - x0, y1 - y0) || 1e-9, segL = D / NM, steps = Math.max(2, Math.ceil(segL / 0.4)), tx = (x1 - x0) / D, ty = (y1 - y0) / D;
           const s0 = (j + half) * segL; // nm from the copy's start, keeps the helix phase continuous
           ctx.lineWidth = 0.35 * NM;
-          for (const ph of [0, Math.PI * 0.8]) {
+          for (const ph of c.dna ? [0, Math.PI * 0.8] : [0]) { // an RNA copy is a single strand
             ctx.strokeStyle = col; ctx.beginPath();
             for (let i = 0; i <= steps; i++) {
               const f = i / steps, w = Math.sin(((s0 + f * segL) / 3.4) * TAU + ph) * NM;
@@ -1276,7 +1289,7 @@ export class Renderer {
             ctx.stroke();
           }
           if (this.pxnm >= 4) for (let d = Math.ceil(s0 / 0.34) * 0.34 - s0; d < segL; d += 0.34) {
-            const f = d / segL, a1 = ((s0 + d) / 3.4) * TAU, w1 = Math.sin(a1) * NM, w2 = Math.sin(a1 + Math.PI * 0.8) * NM;
+            const f = d / segL, a1 = ((s0 + d) / 3.4) * TAU, w1 = Math.sin(a1) * NM, w2 = c.dna ? Math.sin(a1 + Math.PI * 0.8) * NM : w1 - 0.8 * NM; // RNA: bases stick out
             const X = x0 + (x1 - x0) * f, Y = y0 + (y1 - y0) * f;
             ctx.strokeStyle = MONO_COLORS[hash32(c.id + j, Math.round(d * 10)) & 3]; ctx.lineWidth = 0.2 * NM;
             ctx.beginPath(); ctx.moveTo(X - ty * w1 - cx, Y + tx * w1 - cy); ctx.lineTo(X - ty * w2 - cx, Y + tx * w2 - cy); ctx.stroke();

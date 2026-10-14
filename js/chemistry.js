@@ -46,7 +46,7 @@ export class Soup {
   kill(j, by = null, why = '') {
     this.mdead[j] = 1;
     if (this.watchMid && this.mid[j] === this.watchMid) this.watchNext = { obj: by, why };
-    if (by && by.seq) this.world.emit('join', 10, { p: by, x: this.mx[j], y: this.my[j], b: this.mt[j] });
+    if (by && by.seq && why.startsWith('was added to the end')) this.world.emit('join', 10, { p: by, x: this.mx[j], y: this.my[j], b: this.mt[j] });
   }
 
   // Put a polymer inside a protocell (and remember where it lives).
@@ -280,6 +280,7 @@ export class Soup {
           p.copy.push(this.mt[j]);
           this.kill(j, p, 'was used by a ribozyme to copy itself');
           p.prog++;
+          this.world.emit('copy', 12, { p, i: p.prog - 1, x: this.mx[j], y: this.my[j] });
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
             if (this.canAddPolymer()) {
@@ -429,6 +430,8 @@ export class Soup {
           v.pool[t]--;
           p.copy.push(t);
           p.prog++;
+          const a = p.prog * 2.39996 + v.id; // drawn coming in from the protocell's nucleotide pool (cosmetic)
+          this.world.emit('copy', 12, { p, i: p.prog - 1, x: v.x + Math.cos(a) * v.r * 0.6, y: v.y + Math.sin(a) * v.r * 0.6 });
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
             polys.push(Object.assign(this.makePolymer(seq, v.x, v.y), { home: v }));

@@ -90,7 +90,7 @@ function frameStep() {
   // starting from the current view so the camera doesn't jump.
   if (sel && !sel.gone && !flight && sel.follow !== followOn) {
     sel.follow = followOn;
-    if (followOn) { const t = followTarget(sel); sel.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; sel._last = undefined; sel._avgStep = undefined; }
+    if (followOn) startFollow(sel);
     ui.lastHTML = null;
   }
   if (flight) fly(dt);
@@ -152,7 +152,7 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     flight = null;
     renderer.setFieldWidthNm(fov);
     const sel = ui.selected;
-    if (sel && !sel.gone) { const t = followTarget(sel); followOn = sel.follow = true; sel.offset = { x: sel.obj.x - t.x, y: sel.obj.y - t.y }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
+    if (sel && !sel.gone) { const c = centreOf(sel); renderer.cam.x = c.x; renderer.cam.y = c.y; followOn = sel.follow = true; startFollow(sel); }
   };
 }
 $('speed').oninput = (e) => setSpeed(+e.target.value);
@@ -270,27 +270,22 @@ function followTarget(sel) {
   return { x: sel.obj.x, y: sel.obj.y };
 }
 
-// Chase camera: glide after the subject so its movement is visible, keep it near the middle of the
-// screen, and snap only when it moves too far to glide (molecules jump micrometres per tick).
+// Locked camera: the followed thing stays exactly in the middle of the screen, so it never jitters
+// however it moves. When following starts (or after a drag or Fit) the camera glides the last bit
+// into the centre and then holds.
+function startFollow(sel) {
+  const t = followTarget(sel);
+  let c = t;
+  try { c = centreOf(sel); } catch { /* parts without a centre are followed by their body */ }
+  sel.offset = { x: c.x - t.x, y: c.y - t.y };
+  sel.pan = { x: renderer.cam.x - c.x, y: renderer.cam.y - c.y };
+}
+
 function chase(sel, dt) {
-  const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 };
-  const tx = t.x + o.x, ty = t.y + o.y, cam = renderer.cam;
-  const view = renderer.fieldWidthNm() / NM_PER_UNIT;
-  // How far the subject typically moves per frame, relative to the view (smoothed). Things that jump
-  // a large part of the screen every tick can't be glided after, so hold them steady instead of
-  // mixing glides and snaps (which reads as jitter).
-  if (sel._last) {
-    const step = Math.hypot(tx - sel._last.x, ty - sel._last.y) / view;
-    sel._avgStep = sel._avgStep === undefined ? step : sel._avgStep * 0.9 + step * 0.1;
-  }
-  sel._last = { x: tx, y: ty };
-  const dx = tx - cam.x, dy = ty - cam.y, d = Math.hypot(dx, dy);
-  if (d > view * 1.5 || (sel._avgStep ?? 0) > 0.15) { cam.x = tx; cam.y = ty; return; }
-  const k = 1 - Math.exp(-dt / 0.3);
-  cam.x += dx * k; cam.y += dy * k;
-  const lim = view * 0.28; // never let the subject drift further than this from the centre
-  const ex = tx - cam.x, ey = ty - cam.y, e = Math.hypot(ex, ey);
-  if (e > lim) { cam.x += ex * (1 - lim / e); cam.y += ey * (1 - lim / e); }
+  const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 }, p = sel.pan || (sel.pan = { x: 0, y: 0 });
+  if (!(drag && drag.moved > 4)) { const k = Math.exp(-dt / 0.35); p.x *= k; p.y *= k; } // ease back to centre
+  renderer.cam.x = t.x + o.x + p.x;
+  renderer.cam.y = t.y + o.y + p.y;
 }
 
 function kindOf(o) {
@@ -308,7 +303,7 @@ function handOff(old, from, obj, why) {
   if (kind === 'polymer') s.obj._rad = polymerRadius(obj);
   if (kind === 'polymer' && obj.home) s.parent = mkSel('vesicle', obj.home);
   s.follow = old.follow;
-  s.offset = { x: 0, y: 0 };
+  if (s.follow) startFollow(s); // glides over to the successor, then locks on
   ui.toast(`${crumbLabel(from)} ${why || 'changed'}`, world.t);
   ui.select(world, s);
 }
@@ -347,6 +342,7 @@ function fly(dt) {
     followOn = s.follow = true; // a fly-to ends following its destination
     const ft = followTarget(s);
     s.offset = { x: c.x - ft.x, y: c.y - ft.y }; // keep the part itself in the middle
+    s.pan = { x: 0, y: 0 };
   }
 }
 ui.onPick = focus;
@@ -376,7 +372,7 @@ function toggleFollow() {
   if (!s || s.gone) return;
   followOn = s.follow = !s.follow;
   // Keep the object where it is on screen instead of snapping it to the centre.
-  if (s.follow) { const t = followTarget(s); s.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; }
+  if (s.follow) startFollow(s);
   ui.lastHTML = null;
 }
 ui.onFollow = toggleFollow;
@@ -386,15 +382,15 @@ function reframe() {
   const s = ui.selected;
   if (!s || s.gone || !s.follow) return;
   const t = followTarget(s);
-  s.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y };
-  s._last = undefined; s._avgStep = undefined;
+  const o = s.offset || { x: 0, y: 0 };
+  s.pan = { x: renderer.cam.x - t.x - o.x, y: renderer.cam.y - t.y - o.y };
 }
 
 // Up one level (inspector button or Esc); keeps following and keeps the view steady.
 function goUp() {
   const s = ui.selected;
   const up = s ? ancestors(s, world).at(-1) : null;
-  if (up && s.follow) { const t = followTarget(up); up.follow = true; up.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; }
+  if (up && s.follow) { up.follow = true; startFollow(up); }
   ui.select(world, up || null);
 }
 ui.onUp = goUp;
