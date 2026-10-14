@@ -111,7 +111,7 @@ function moleculeInfo(s) {
 }
 
 // ------------------------------------------------------------- polymers
-function polymerFrame(p) { return { x: p.x, y: p.y, ang: p._drawAng ?? p.ang }; }
+function polymerFrame(p) { return { x: p._rx ?? p.x, y: p._ry ?? p.y, ang: p._drawAng ?? p.ang }; }
 
 function nucleotideIn(p, i, renderer, parent) {
   const frame = () => {

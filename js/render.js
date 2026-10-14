@@ -339,13 +339,16 @@ export class Renderer {
     } else {
       for (let i = 0; i < soup.n; i++) {
         if (!this.inView(mx[i], my[i], m)) continue;
-        this.drawMonomer(mx[i], my[i], mt[i], (soup.mid[i] * 2.399 + this.time * 0.04) % TAU); // tumbling
+        const j = this.jig(soup.mid[i]);
+        this.drawMonomer(mx[i] + j.x, my[i] + j.y, mt[i], (soup.mid[i] * 2.399 + this.time * 0.04) % TAU); // tumbling
       }
     }
 
     for (const p of soup.polymers) {
       if (!this.inView(p.x, p.y, p.seq.length * DIM.ntRise * NM)) continue;
-      this.drawPolymer(p, p.x, p.y, this.freeAngle(p));
+      const ang = this.freeAngle(p), j = this.jig(p._ph * 977, 0.6);
+      p._rx = p.x + j.x; p._ry = p.y + j.y; // where it is drawn this frame
+      this.drawPolymer(p, p._rx, p._ry, ang);
     }
 
     for (const ve of soup.vesicles) {
@@ -468,7 +471,19 @@ export class Renderer {
     const inner = ve.r - DIM.bilayer * NM, t = this.time, w = (2 * NM) / inner;
     const fx = p._fx + Math.sin(t * 0.031 + p._ph) * w, fy = p._fy + Math.cos(t * 0.027 + p._ph * 1.7) * w;
     p._drawFa = p._fa + Math.sin(t * 0.013 + p._ph) * 0.6;
-    p.x = ve.x + fx * inner; p.y = ve.y + fy * inner;
+    p._bx = ve.x + p._fx * inner; p._by = ve.y + p._fy * inner; // its home spot in the protocell
+    const j = this.jig(p._ph * 977, 0.6);
+    p.x = p._rx = ve.x + fx * inner + j.x; p.y = p._ry = ve.y + fy * inner + j.y;
+  }
+
+  // Thermal jiggle (drawing only): a smooth few-tenths-of-a-nanometre wobble, so molecules look alive
+  // even when the camera is holding them still. Depends only on sim time.
+  jig(seed, ampNm = 0.4) {
+    const t = this.time, a = ampNm * NM;
+    return {
+      x: (Math.sin(t * 0.27 + seed) + 0.5 * Math.sin(t * 0.71 + seed * 1.7)) * a,
+      y: (Math.cos(t * 0.31 + seed * 0.6) + 0.5 * Math.sin(t * 0.59 + seed * 2.3)) * a,
+    };
   }
 
   // Free strands turn slowly and smoothly on screen (the simulation's Brownian angle jumps every tick
@@ -1031,7 +1046,7 @@ export class Renderer {
     ctx.lineWidth = 1.5 * this.px;
     ctx.setLineDash([4 * this.px, 3 * this.px]);
     ctx.beginPath();
-    ctx.arc(sel.x - this.cam.x, sel.y - this.cam.y, (sel.r || sel._rad || 0) + 5 * this.px, 0, TAU);
+    ctx.arc((sel._rx ?? sel.x) - this.cam.x, (sel._ry ?? sel.y) - this.cam.y, (sel.r || sel._rad || 0) + 5 * this.px, 0, TAU);
     ctx.stroke();
     ctx.setLineDash([]);
   }

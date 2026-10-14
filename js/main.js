@@ -85,10 +85,7 @@ function frameStep() {
   // A strand inside a protocell: place it for this frame before aiming the camera at it.
   for (let q = sel; q; q = q.parent) if (q.kind === 'polymer' && q.obj.home && !q.obj.home.dead) renderer.placeInternal(q.obj, q.obj.home);
   opts.selected = sel && !sel.gone ? sel.obj : null;
-  if (sel && sel.follow && !sel.gone) {
-    const o = sel.offset || { x: 0, y: 0 };
-    renderer.cam.x = sel.obj.x + o.x; renderer.cam.y = sel.obj.y + o.y;
-  }
+  if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }
   renderer.draw(world, opts);
   ui.update(world, frame);
@@ -145,7 +142,7 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     if (!fov) { $('btn-fit').click(); return; }
     renderer.setFieldWidthNm(fov);
     const sel = ui.selected;
-    if (sel && !sel.gone) { sel.follow = true; sel.offset = { x: 0, y: 0 }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
+    if (sel && !sel.gone) { const t = followTarget(sel); sel.follow = true; sel.offset = { x: sel.obj.x - t.x, y: sel.obj.y - t.y }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
   };
 }
 $('speed').oninput = (e) => setSpeed(+e.target.value);
@@ -227,7 +224,9 @@ function trackSelection(sel) {
     if (i < 0) {
       if (!q.st.gone) { q.st.gone = true; q.st.next = soup.watchNext; }
     } else {
-      q.st.x = soup.mx[i]; q.st.y = soup.my[i];
+      const j = renderer.jig(q.st.mid);
+      q.st.sx = soup.mx[i]; q.st.sy = soup.my[i];          // where the simulation has it
+      q.st.x = q.st.sx + j.x; q.st.y = q.st.sy + j.y;      // where it is drawn (thermal jiggle)
       q.st.ang = (q.st.mid * 2.399 + (opts.time ?? world.t) * 0.04) % (Math.PI * 2); // molecules tumble
     }
   }
@@ -243,6 +242,43 @@ function trackSelection(sel) {
     break;
   }
   sel.gone = true;
+}
+
+// What the camera tracks: the moving body a selection belongs to (so a part's own motion, a strand
+// wandering inside its protocell, or a molecule's jiggle stays visible on screen).
+function followTarget(sel) {
+  for (let q = sel; q; q = q.parent) {
+    if (q.st) return { x: q.st.sx ?? q.st.x, y: q.st.sy ?? q.st.y };
+    if (q.kind === 'polymer') {
+      const p = q.obj;
+      return p.home && !p.home.dead && p._bx !== undefined ? { x: p._bx, y: p._by } : { x: p.x, y: p.y };
+    }
+    if (q.kind === 'cell' || q.kind === 'vesicle' || q.kind === 'virus' || q.kind === 'organism') return { x: q.obj.x, y: q.obj.y };
+  }
+  return { x: sel.obj.x, y: sel.obj.y };
+}
+
+// Chase camera: glide after the subject so its movement is visible, keep it near the middle of the
+// screen, and snap only when it moves too far to glide (molecules jump micrometres per tick).
+function chase(sel, dt) {
+  const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 };
+  const tx = t.x + o.x, ty = t.y + o.y, cam = renderer.cam;
+  const view = renderer.fieldWidthNm() / NM_PER_UNIT;
+  // How far the subject typically moves per frame, relative to the view (smoothed). Things that jump
+  // a large part of the screen every tick can't be glided after, so hold them steady instead of
+  // mixing glides and snaps (which reads as jitter).
+  if (sel._last) {
+    const step = Math.hypot(tx - sel._last.x, ty - sel._last.y) / view;
+    sel._avgStep = sel._avgStep === undefined ? step : sel._avgStep * 0.9 + step * 0.1;
+  }
+  sel._last = { x: tx, y: ty };
+  const dx = tx - cam.x, dy = ty - cam.y, d = Math.hypot(dx, dy);
+  if (d > view * 1.5 || (sel._avgStep ?? 0) > 0.15) { cam.x = tx; cam.y = ty; return; }
+  const k = 1 - Math.exp(-dt / 0.3);
+  cam.x += dx * k; cam.y += dy * k;
+  const lim = view * 0.28; // never let the subject drift further than this from the centre
+  const ex = tx - cam.x, ey = ty - cam.y, e = Math.hypot(ex, ey);
+  if (e > lim) { cam.x += ex * (1 - lim / e); cam.y += ey * (1 - lim / e); }
 }
 
 function kindOf(o) {
@@ -270,7 +306,8 @@ function focus(s) {
   if (s.kind === 'polymer') s.obj._rad = polymerRadius(s.obj);
   ui.select(world, s);
   s.follow = true;
-  s.offset = { x: 0, y: 0 };
+  const ft = followTarget(s);
+  s.offset = { x: s.obj.x - ft.x, y: s.obj.y - ft.y }; // centre on the part itself
   renderer.setFieldWidthNm(fovFor(s));
   if (!s.obj.dead) { renderer.cam.x = s.obj.x; renderer.cam.y = s.obj.y; }
 }
@@ -299,7 +336,7 @@ function toggleFollow() {
   if (!s || s.gone) return;
   s.follow = !s.follow;
   // Keep the object where it is on screen instead of snapping it to the centre.
-  if (s.follow) s.offset = { x: renderer.cam.x - s.obj.x, y: renderer.cam.y - s.obj.y };
+  if (s.follow) { const t = followTarget(s); s.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; }
   ui.lastHTML = null;
 }
 ui.onFollow = toggleFollow;
@@ -308,7 +345,7 @@ ui.onFollow = toggleFollow;
 function goUp() {
   const s = ui.selected;
   const up = s ? ancestors(s, world).at(-1) : null;
-  if (up && s.follow) { up.follow = true; up.offset = { x: renderer.cam.x - up.obj.x, y: renderer.cam.y - up.obj.y }; }
+  if (up && s.follow) { const t = followTarget(up); up.follow = true; up.offset = { x: renderer.cam.x - t.x, y: renderer.cam.y - t.y }; }
   ui.select(world, up || null);
 }
 ui.onUp = goUp;
