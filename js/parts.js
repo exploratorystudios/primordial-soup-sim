@@ -4,7 +4,8 @@
 // state (eukaryote or not, plastids, size, armor, genome) but are not simulated one by one.
 import { BASES, LIPID } from './chemistry.js';
 import { NM_PER_UNIT, DIM, formatLen, dnaBase } from './render.js';
-import { microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, local, toLocal, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
+import { ribosomeModel, ribosomeAngle, AMINO_NAMES } from './ribosome.js';
+import { wallLayers, wallLayerR, WALL_LINK, WALL_UNIT, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, local, toLocal, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
 import { TYPE_NAMES } from './life.js';
 import * as Gn from './genome.js';
 
@@ -64,6 +65,10 @@ function inFrame(f, lx, ly) {
 
 // Field of view (nm) that frames an object of radius r (world units) nicely.
 export function fovFor(s) {
+  if (s.outline) {
+    const o = s.outline();
+    return Math.max(6, (o.type === 'ellipse' ? Math.max(o.rx, o.ry) : o.r) * 2 * NM_PER_UNIT * 1.35);
+  }
   if (s.shape) {
     // Thin structures (flagellum, ER, microtubule, pilus): frame their whole extent.
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -76,6 +81,7 @@ export function fovFor(s) {
 
 // Where to point the camera to frame a part (the middle of a thin structure, else its centre).
 export function centreOf(s) {
+  if (s.outline) { const o = s.outline(); return { x: o.x, y: o.y }; }
   if (s.shape) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const pts of s.shape.lines()) for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
@@ -179,7 +185,7 @@ function vesicleParts(s, renderer) {
     title: 'Fatty-acid bilayer',
     kv: [['Thickness', '≈ 4 nm'], ['Diameter', um(v.r * 2)], ['Molecules (3D estimate)', lipidCount(v.r, 0.3)]],
     desc: 'Two layers of fatty acids, tails inward. Leaky enough to let nucleotides diffuse in, tight enough to keep RNA chains trapped.',
-  }, { parent: s, ring: { c: v, phospho: false, label: 'A fatty acid in the membrane' } });
+  }, { parent: s, ring: { c: v, phospho: false, label: 'A fatty acid in the membrane' }, outline: () => ({ type: 'circle', x: v.x, y: v.y, r: v.r, w: DIM.bilayer * NM }) });
   mem.kids = () => [membraneLipid(() => v.x, () => v.y, () => v.r, 0, dead, mem, 'A fatty acid in the membrane')];
   out.push(mem);
   for (const p of v.polys) {
@@ -220,7 +226,7 @@ function cellParts(s, world, renderer) {
     title: 'Plasma membrane (phospholipid bilayer)',
     kv: [['Thickness', '≈ 4 nm'], ['Lipid molecules (estimate)', lipidCount(c.r, 0.65)]],
     desc: 'Phospholipids with two tails each, studded with transport and energy proteins. It holds the proton gradient that powers ATP synthesis.',
-  }, { parent: s, ring: { c, phospho: true, label: 'A phospholipid in the membrane' } });
+  }, { parent: s, ring: { c, phospho: true, label: 'A phospholipid in the membrane' }, outline: () => ({ type: 'circle', x: c.x, y: c.y, r: c.r, w: DIM.bilayer * NM }) });
   mem.kids = () => {
     const out2 = [membraneLipid(() => c.x, () => c.y, () => c.r, 0, dead, mem, 'A phospholipid in the membrane', true)];
     // One example of each kind of membrane protein, at its real slot in the membrane.
@@ -240,8 +246,8 @@ function cellParts(s, world, renderer) {
     out.push(part('Cell wall', anchored(() => ({ x: c.x - c.r, y: c.y }), (20 + armor * 80) * NM * 2, dead), {
       title: c.mito ? 'Pellicle / cell wall' : 'Cell wall (peptidoglycan)',
       kv: [['Thickness', formatLen(20 + armor * 80)], ['Armor gene', c.armor.toFixed(2)]],
-      desc: 'A tough mesh outside the membrane that resists bursting and makes the cell harder for predators to digest.',
-    }, { parent: s }));
+      desc: 'A tough mesh of sugar chains (glycan strands) tied together by short peptides: it resists bursting and makes the cell harder for predators to digest.',
+    }, { parent: s, wallOf: { c, wall: (20 + armor * 80) * NM }, outline: () => ({ type: 'circle', x: c.x, y: c.y, r: c.r + (20 + armor * 80) * NM, w: (20 + armor * 80) * NM }) }));
   }
 
   out.push(part('Cytoplasm', at(0.6, 0.3, c.r * 0.3), {
@@ -266,10 +272,10 @@ function cellParts(s, world, renderer) {
     const nuc = part('Nucleus', at(0, 0, c.r * 0.34 + 90 * NM), { // includes the envelope and its pores
       title: 'Nucleus', kv: [['Diameter', um(c.r * 0.68)], ['Envelope', 'two membranes, 30 nm apart']],
       desc: 'Walls the genome off from the cytoplasm, a defining feature of eukaryotes.',
-    }, { parent: s, nucleusOf: c });
+    }, { parent: s, nucleusOf: c, outline: () => ({ type: 'circle', x: c.x, y: c.y, r: c.r * 0.34 + DIM.nuclearGap * NM }) });
     genome.parent = nuc; // in eukaryotes the genome lives inside the nucleus
     nuc.kids = () => [
-      part('Nuclear envelope & pores', at(0.34, 0, DIM.nuclearPore * NM), { title: 'Nuclear envelope', kv: [['Pore diameter', '≈ 100 nm'], ['Gap between membranes', '≈ 30 nm']], desc: 'A double membrane perforated by pore complexes, gates that let RNA out and proteins in.' }, { parent: nuc }),
+      part('Nuclear envelope & pores', at(0.34, 0, DIM.nuclearPore * NM), { title: 'Nuclear envelope', kv: [['Pore diameter', '≈ 100 nm'], ['Gap between membranes', '≈ 30 nm'], ['Pores (drawn)', String(nuclearPores(c).length)]], desc: 'A double membrane perforated by pore complexes, gates that let RNA out and proteins in.' }, { parent: nuc, outline: () => ({ type: 'circle', x: c.x, y: c.y, r: c.r * 0.34 + DIM.nuclearGap * NM, w: DIM.nuclearGap * NM }) }),
       part('Nucleolus', at(a.nuc.fx * 0.34, a.nuc.fy * 0.34, c.r * 0.1), { title: 'Nucleolus', kv: [['Diameter', um(c.r * 0.2)]], desc: 'Dense region where ribosomal RNA is made and ribosomes are assembled.' }, { parent: nuc }),
       genome,
     ];
@@ -491,16 +497,68 @@ function cellParts(s, world, renderer) {
 
 function ribosome(c, k, at, parent) {
   const a = c._anat, fx = a.ribo[k * 2], fy = a.ribo[k * 2 + 1];
-  const r = (DIM.ribosome * NM) / 2;
-  const rb = part(`Ribosome ${k + 1}`, at(fx, fy, r), {
-    title: c.mito ? '80S ribosome' : '70S ribosome',
-    kv: [['Diameter', c.mito ? '≈ 25 nm' : '≈ 22 nm'], ['Mass', c.mito ? '≈ 4.3 MDa' : '≈ 2.5 MDa'], ['RNA content', '≈ 60%']],
-    desc: 'Two subunits clamp a messenger RNA. The catalytic heart that joins amino acids is made of RNA, not protein.',
+  const pos = () => ({ x: c.x + fx * c.r, y: c.y + fy * c.r });
+  return translatingRibosome(c, pos, c.id * 4099 + k, `Ribosome ${k + 1}`, parent);
+}
+
+// A ribosome as the molecular machine it is (see ribosome.js): subunits of rRNA and protein,
+// messenger RNA, transfer RNAs and the protein being made, all clickable down to single residues.
+function translatingRibosome(c, pos, seed, label, parent, bound = false) {
+  const m = ribosomeModel(seed, c.mito), ang = ribosomeAngle(seed), dead = () => c.dead, euk = c.mito;
+  const W = (lx, ly) => { const p = pos(), ca = Math.cos(ang), sa = Math.sin(ang); return { x: p.x + (lx * ca - ly * sa) * NM, y: p.y + (lx * sa + ly * ca) * NM }; };
+  const at = (lx, ly, r) => anchored(() => W(lx, ly), r * NM, dead);
+  const shape = (pts, w) => ({ w: w * NM, lines: () => [pts.map((q) => W(q.x, q.y))] });
+  const ell = (e) => () => { const q = W(e.cx, e.cy); return { type: 'ellipse', x: q.x, y: q.y, rx: e.rx * NM, ry: e.ry * NM, ang }; };
+  const rb = part(label, at(0, 0, (DIM.ribosome * (euk ? 1.2 : 1)) / 2), {
+    title: bound ? '80S ribosome on the ER' : euk ? '80S ribosome' : '70S ribosome',
+    kv: [['Diameter', euk ? '≈ 25 nm' : '≈ 21 nm'], ['Mass', euk ? '≈ 4.3 MDa' : '≈ 2.5 MDa'], ['RNA content', '≈ 60%'], ['Now making', `a protein, ${m.peptide.length} amino acids so far`]],
+    desc: (bound ? 'Docked on the ER, it threads the protein it makes straight through the membrane. ' : '') + 'It reads a messenger RNA three bases (one codon) at a time; transfer RNAs bring the matching amino acids, and the large subunit links them into a protein. The catalytic core is made of RNA, a living echo of the RNA world.',
   }, { parent });
-  rb.kids = () => [
-    part(c.mito ? 'Large subunit (60S)' : 'Large subunit (50S)', at(fx, fy, r * 0.8), { title: 'Large subunit', kv: [['Contains', c.mito ? '28S, 5.8S, 5S rRNA + ~47 proteins' : '23S + 5S rRNA + ~33 proteins']], desc: 'Holds the peptidyl-transferase centre, a ribozyme that forges peptide bonds.' }, { parent: rb }),
-    part(c.mito ? 'Small subunit (40S)' : 'Small subunit (30S)', anchored(() => { const p = at(fx, fy, 0); return { x: p.x + r * 0.5, y: p.y - r * 0.5 }; }, r * 0.6, () => c.dead), { title: 'Small subunit', kv: [['Contains', c.mito ? '18S rRNA + ~33 proteins' : '16S rRNA + ~21 proteins']], desc: 'Reads the messenger RNA codon by codon.' }, { parent: rb }),
-  ];
+  const rnaPart = (lbl, pts, info, par) => part(lbl, at(pts[pts.length >> 1].x, pts[pts.length >> 1].y, 1), info, { parent: par, shape: shape(pts, 1.6), rnaOf: { pts, W, c } });
+  rb.kids = () => {
+    const Lg = part(euk ? 'Large subunit (60S)' : 'Large subunit (50S)', at(m.L.cx, m.L.cy, m.L.ry), {
+      title: 'Large subunit', kv: [['Contains', euk ? '28S, 5.8S, 5S rRNA + ~47 proteins' : '23S + 5S rRNA + ~33 proteins']],
+      desc: 'Holds the peptidyl-transferase centre, a ribozyme that forges peptide bonds, and the tunnel the new protein leaves through.',
+    }, { parent: rb, outline: ell(m.L) });
+    Lg.kids = () => [
+      rnaPart(euk ? '28S rRNA' : '23S rRNA', m.rnaL, { title: euk ? '28S ribosomal RNA' : '23S ribosomal RNA', kv: [['Real length', euk ? '≈ 4,700 nucleotides' : '≈ 2,900 nucleotides'], ['Drawn', `${m.rnaL.length} nucleotides (scaled down)`]], desc: 'The structural and catalytic heart of the large subunit. Its folded chain forms the active site that joins amino acids.' }, Lg),
+      rnaPart('5S rRNA', m.rna5S, { title: '5S ribosomal RNA', kv: [['Real length', '≈ 120 nucleotides']], desc: 'A small RNA that helps hold the large subunit together.' }, Lg),
+      ...m.protL.map((pr) => part(`Ribosomal protein ${pr.name}`, at(pr.x, pr.y, pr.r), { title: `Ribosomal protein ${pr.name}`, kv: [['Size', `≈ ${(pr.r * 2).toFixed(0)} nm`]], desc: 'One of the proteins that clamp and stabilise the rRNA fold. They mostly sit on the outside; the RNA does the chemistry.' }, { parent: Lg })),
+      part('Peptidyl-transferase centre', at(0.6 * m.s, 5.9 * m.s, 1.2), { title: 'Peptidyl-transferase centre', kv: [['Made of', 'rRNA only']], desc: 'Where each new amino acid is joined to the growing chain. It is a ribozyme: proof that RNA can catalyse the chemistry of life.' }, { parent: Lg }),
+      part('Exit tunnel', at(0.3 * m.s, 9 * m.s, 0.8), { title: 'Polypeptide exit tunnel', kv: [['Length', '≈ 10 nm'], ['Width', '≈ 1.5 nm']], desc: 'The new protein snakes out through this narrow tunnel in the large subunit.' }, { parent: Lg, shape: { w: 1.6 * NM, lines: () => [[W(0.3 * m.s, 5.8 * m.s), W(0.3 * m.s, m.L.cy + m.L.ry)]] } }),
+    ];
+    const Sm = part(euk ? 'Small subunit (40S)' : 'Small subunit (30S)', at(m.S.cx, m.S.cy, m.S.ry), {
+      title: 'Small subunit', kv: [['Contains', euk ? '18S rRNA + ~33 proteins' : '16S rRNA + ~21 proteins']],
+      desc: 'Grips the messenger RNA and checks each codon against the anticodon of the incoming transfer RNA.',
+    }, { parent: rb, outline: ell(m.S) });
+    Sm.kids = () => [
+      rnaPart(euk ? '18S rRNA' : '16S rRNA', m.rnaS, { title: euk ? '18S ribosomal RNA' : '16S ribosomal RNA', kv: [['Real length', euk ? '≈ 1,900 nucleotides' : '≈ 1,500 nucleotides'], ['Drawn', `${m.rnaS.length} nucleotides (scaled down)`]], desc: 'Forms the decoding centre. Its sequence changes so slowly that biologists use it to build the tree of all life.' }, Sm),
+      ...m.protS.map((pr) => part(`Ribosomal protein ${pr.name}`, at(pr.x, pr.y, pr.r), { title: `Ribosomal protein ${pr.name}`, kv: [['Size', `≈ ${(pr.r * 2).toFixed(0)} nm`]], desc: 'A protein of the small subunit.' }, { parent: Sm })),
+      part('Decoding centre', at(2.7 * m.s, -1.2 * m.s, 1), { title: 'Decoding centre', kv: [], desc: 'Where the codon on the mRNA and the anticodon of the tRNA are checked for a perfect match before the amino acid is accepted.' }, { parent: Sm }),
+    ];
+    const mr = part('Messenger RNA', at(0, m.mrna[0].y, 1), {
+      title: 'Messenger RNA (mRNA)', kv: [['Read', '5′ → 3′, one codon (3 bases) at a time'], ['Drawn', `${m.mrna.length} nucleotides`]],
+      desc: 'A working copy of one gene. The ribosome slides along it, translating its codons into amino acids.',
+    }, { parent: rb, shape: shape(m.mrna, 1.4), rnaOf: { pts: m.mrna, W, c } });
+    const B = ['A', 'U', 'G', 'C'];
+    const trna = m.trna.map((t) => {
+      const tp = part(`tRNA in the ${t.site} site`, at(t.pts[1].x, t.pts[1].y, 1.5), {
+        title: `Transfer RNA (${t.site} site)`,
+        kv: [['Anticodon', t.anticodon.map((b) => B[b]).join('')], ['Pairs with codon', t.codon.map((b) => B[b]).join('')], ['Carries', t.site === 'E' ? 'nothing (it has delivered)' : AMINO_NAMES[t.aa]], ['Size', '≈ 7 nm, L-shaped']],
+        desc: t.site === 'A' ? 'Arriving with the next amino acid. It stays only if its anticodon matches the codon.' : t.site === 'P' ? 'Holding the growing protein chain while the next amino acid is added.' : 'Empty, about to leave the ribosome and be reloaded with another amino acid.',
+      }, { parent: rb, shape: shape(t.pts, 1.8) });
+      tp.kids = () => [
+        part(`Anticodon ${t.anticodon.map((b) => B[b]).join('')}`, at(t.x, t.pts[0].y, 1), { title: 'Anticodon loop', kv: [['Bases', t.anticodon.map((b) => B[b]).join('')]], desc: 'Three bases that pair with the codon on the mRNA, the dictionary of the genetic code.' }, { parent: tp }),
+        ...(t.site !== 'E' ? [part(AMINO_NAMES[t.aa], at(t.pts[3].x + 0.4, t.pts[3].y + 0.3, 0.5), { title: `${AMINO_NAMES[t.aa]} (${t.aa})`, kv: [], desc: 'The amino acid this tRNA carries, attached to its acceptor end.' }, { parent: tp })] : []),
+      ];
+      return tp;
+    });
+    const pe = part('New protein chain', at(m.peptide[m.peptide.length >> 1].x, m.peptide[m.peptide.length >> 1].y, 1), {
+      title: 'Nascent protein', kv: [['Length so far', `${m.peptide.length} amino acids`], ['Sequence start', m.peptide.slice(0, 8).map((q) => q.aa).join('-') + '…']],
+      desc: 'The protein being made, emerging from the exit tunnel. Once released it will fold into its working shape.',
+    }, { parent: rb, shape: shape(m.peptide, 0.9), peptideOf: { pts: m.peptide, W, c } });
+    return [Lg, Sm, mr, ...trna, pe];
+  };
   return rb;
 }
 
@@ -510,9 +568,9 @@ function mitochondrion(c, m, k, at, parent) {
   const mt = part(`Mitochondrion ${k + 1}`, at(m.fx, m.fy, L / 2), {
     title: 'Mitochondrion', kv: [['Length', um(L)], ['Membranes', 'outer + folded inner']],
     desc: 'The cell’s power plant: pumps protons across its inner membrane and lets them flow back through ATP synthase.',
-  }, { parent, mitoOf: { c, m } });
+  }, { parent, mitoOf: { c, m }, outline: () => { const q = local(c, m, 0, 0); return { type: 'ellipse', x: q.x, y: q.y, rx: L / 2, ry: W / 2, ang: m.ang }; } });
   mt.kids = () => [
-    part('Outer membrane', anchored(lp(L / 2, 0), 7 * NM, dead), { title: 'Outer membrane', kv: [['Thickness', '≈ 7 nm']], desc: 'Smooth and porous: a remnant of the ancestral bacterium’s outer envelope.' }, { parent: mt, outer: true }),
+    part('Outer membrane', anchored(lp(L / 2, 0), 7 * NM, dead), { title: 'Outer membrane', kv: [['Thickness', '≈ 7 nm']], desc: 'Smooth and porous: a remnant of the ancestral bacterium’s outer envelope.' }, { parent: mt, outer: true, outline: () => { const q = local(c, m, 0, 0); return { type: 'ellipse', x: q.x, y: q.y, rx: L / 2, ry: W / 2, ang: m.ang }; } }),
     ...cristae(L, W).map((cr, i) => {
       const cp = part(`Crista ${i + 1}`, anchored(lp(cr.x, (cr.y1 + cr.y2) / 2), 10 * NM, dead), {
         title: 'Crista (fold of the inner membrane)', kv: [['Holds', 'electron transport chain, ATP synthase']],
@@ -535,7 +593,7 @@ function chloroplast(c, p, k, at, parent) {
   const lp = (lx, ly) => () => local(c, p, lx, ly);
   const cp = part(`Chloroplast ${k + 1}`, at(p.fx, p.fy, L / 2), {
     title: 'Chloroplast', kv: [['Length', um(L)]], desc: 'Captures sunlight; releases oxygen as a by-product.',
-  }, { parent, plastOf: { c, p } });
+  }, { parent, plastOf: { c, p }, outline: () => { const q = local(c, p, 0, 0); return { type: 'ellipse', x: q.x, y: q.y, rx: L / 2, ry: W / 2, ang: p.ang }; } });
   cp.kids = () => [
     ...grana(L, W).map((g, gi) => {
       const gp = part(`Granum ${gi + 1}`, anchored(lp(g.x, g.y), Math.max(g.w, g.h) / 2 + 10 * NM, dead), {
@@ -564,11 +622,7 @@ function chloroplast(c, p, k, at, parent) {
 
 function boundRibosome(c, a, k, parent) {
   const q = () => erRibosomes(c, a)[k] || c;
-  const r = (DIM.ribosome * NM) / 2;
-  return part('Bound ribosome', anchored(q, r, () => c.dead), {
-    title: '80S ribosome on the ER', kv: [['Diameter', '≈ 25 nm']],
-    desc: 'A ribosome docked on the ER, threading the protein it is making straight through the membrane into the ER lumen.',
-  }, { parent });
+  return translatingRibosome(c, q, c.id * 4099 + 100000 + k, 'Bound ribosome', parent, true);
 }
 
 function membraneProtein(c, k, parent) {
@@ -684,6 +738,47 @@ function virusInfo(s) {
     kv: [['Size', '≈ 100 nm head, 200 nm tail'], ['Binding key', `${v.k1.toFixed(2)} / ${v.k2.toFixed(2)}`], ['Age', `${v.age} ticks`], ['Carries host gene', v.cargo ? (Gn.GENE_NAMES[v.cargo.i] || `#${v.cargo.i}`) : 'no']],
     desc: 'Not alive on its own: a packaged genome that drifts until it meets a cell with matching receptors, takes it over, and bursts it to release ~10–40 copies.',
   };
+}
+
+// The wall node under the cursor: a glycan strand (layer), a cross-link, or a single sugar unit.
+function wallNodeAt(ws, p, tol, pxnm) {
+  if (pxnm < 1.5) return null; // too far away to make out the mesh
+  const { c, wall } = ws.wallOf, n = wallLayers(wall), th = Math.atan2(p.y - c.y, p.x - c.x), d = Math.hypot(p.x - c.x, p.y - c.y);
+  let li = 0, bd = Infinity;
+  for (let i = 0; i < n; i++) { const e = Math.abs(d - wallLayerR(c, wall, i)); if (e < bd) { bd = e; li = i; } }
+  const R = wallLayerR(c, wall, li), pos = (r, a) => () => ({ x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r });
+  // On a cross-link? (they sit between layers li and li+1 at staggered angles)
+  for (const i of [li - 1, li]) {
+    if (i < 0 || i + 1 >= n) continue;
+    const r1 = wallLayerR(c, wall, i), r2 = wallLayerR(c, wall, i + 1);
+    if (d < r1 - tol || d > r2 + tol) continue;
+    const da = WALL_LINK / r1, off = (i % 2) * 0.5, k = Math.round(th / da - off), a = (k + off) * da;
+    if (Math.abs(th - a) * d < 0.6 * NM + tol && d > r1 + 0.5 * NM && d < r2 - 0.5 * NM) {
+      return part('Peptide cross-link', anchored(pos((r1 + r2) / 2, a), 1.5 * NM, () => c.dead), {
+        title: 'Peptide cross-link', kv: [['Length', '≈ 4 nm'], ['Joins', `layers ${i + 1} and ${i + 2}`]],
+        desc: 'A short chain of amino acids (some of them unusual D-forms) bridging two glycan strands. Penicillin works by blocking the enzyme that makes these links.',
+      }, { parent: ws });
+    }
+  }
+  if (bd > 1 * NM + tol) return null;
+  const strand = part(`Glycan strand (layer ${li + 1} of ${n})`, anchored(pos(R, th), 0.5 * NM, () => c.dead), {
+    title: 'Glycan strand', kv: [['Layer', `${li + 1} of ${n}`], ['Made of', 'alternating NAG and NAM sugars']],
+    desc: 'A long sugar chain wrapped around the cell. Layers of them, cross-linked by peptides, make the wall.',
+  }, { parent: ws, shape: { w: 1.6 * NM, lines: () => [arcPts(c.x, c.y, R, th - 0.004, th + 0.004, 6)] } });
+  const ua = Math.round(th / (WALL_UNIT / R)) * (WALL_UNIT / R);
+  strand.kids = () => {
+    const unit = part('NAG–NAM disaccharide', anchored(pos(R, ua), 0.5 * NM, () => c.dead), {
+      title: 'NAG–NAM unit', kv: [['Size', '≈ 1 nm'], ['Sugars', 'N-acetylglucosamine + N-acetylmuramic acid']],
+      desc: 'The repeating brick of a glycan strand. A short peptide stem hangs off each NAM, ready to be cross-linked.',
+    }, { parent: strand });
+    unit.kids = () => [
+      part('N-acetylglucosamine (NAG)', anchored(pos(R, ua - 0.25 * WALL_UNIT / R), 0.25 * NM, () => c.dead), { title: 'N-acetylglucosamine', kv: [['Formula', 'C₈H₁₅NO₆']], desc: 'An amino sugar, also the building block of chitin.' }, { parent: unit }),
+      part('N-acetylmuramic acid (NAM)', anchored(pos(R, ua + 0.25 * WALL_UNIT / R), 0.25 * NM, () => c.dead), { title: 'N-acetylmuramic acid', kv: [['Formula', 'C₁₁H₁₉NO₈']], desc: 'Found only in bacterial walls; carries the peptide stem.' }, { parent: unit }),
+      part('Peptide stem', anchored(pos(R + 0.6 * NM, ua), 0.3 * NM, () => c.dead), { title: 'Peptide stem', kv: [['Length', '4–5 amino acids']], desc: 'The handle that gets cross-linked to a neighbouring strand.' }, { parent: unit }),
+    ];
+    return [unit];
+  };
+  return strand;
 }
 
 function nuclearPore(c, k, parent) {
@@ -884,8 +979,10 @@ export function childAt(s, p, tol, world, renderer) {
     if (Math.abs(d - c.r) < DIM.bilayer * NM + tol) return out(kids[0]);
     const named = (re) => all.filter((k) => re.test(k.label));
     if (d > c.r) {
-      // Outside the membrane: wall, flagellum, pili, junctions.
-      return out(smallestHit([...named(/^Cell wall|^Flagellum|^Pilus|^Junction/)], p, tol));
+      // Outside the membrane: the wall band first, then flagellum, pili, junctions.
+      const wallPart = kids.find((k) => k.wallOf);
+      if (wallPart && d - c.r <= wallPart.wallOf.wall + 2 * NM + tol) return out(wallPart);
+      return out(smallestHit([...named(/^Flagellum|^Pilus|^Junction/)], p, tol));
     }
     // Inside: compact organelles first (they are drawn on top), then thin networks, then ribosomes.
     const isLine = (k) => !!k.shape;
@@ -982,6 +1079,29 @@ export function childAt(s, p, tol, world, renderer) {
       }
       return out(s.kids()[0]);
     }
+    if (s.rnaOf || s.peptideOf) {
+      if (pxnm < 4) return null;
+      const { pts, W, c } = s.rnaOf || s.peptideOf;
+      let best = -1, bd = Infinity;
+      for (let i = 0; i < pts.length; i++) { const q = W(pts[i].x, pts[i].y), d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = i; } }
+      if (best < 0 || bd > 1.2 * NM + tol) return null;
+      const i = best, q = () => W(pts[i].x, pts[i].y);
+      const dir = () => { const a = W(pts[Math.max(0, i - 1)].x, pts[Math.max(0, i - 1)].y), b = W(pts[Math.min(pts.length - 1, i + 1)].x, pts[Math.min(pts.length - 1, i + 1)].y); return Math.atan2(b.y - a.y, b.x - a.x); };
+      if (s.rnaOf) {
+        const frame = () => { const w = q(); return { x: w.x, y: w.y, ang: dir() }; };
+        return out(molecule(pts[i].b, frame, () => c.dead, s, { label: `${i + 1}. ${BASES[pts[i].b]} · ${NT_INFO[pts[i].b].base}` }));
+      }
+      const aa = pts[i].aa;
+      const res = part(`${i + 1}. ${AMINO_NAMES[aa]}`, anchored(q, 0.3 * NM, () => c.dead), {
+        title: `${AMINO_NAMES[aa]} (${aa}), residue ${i + 1}`, kv: [['Size', '≈ 0.4 nm along the chain']],
+        desc: 'One of the 20 amino acids life uses. Its side chain decides whether this part of the protein is oily, charged or reactive, and so how the protein folds.',
+      }, { parent: s });
+      res.kids = () => [
+        part('Peptide backbone (N–Cα–C)', anchored(q, 0.2 * NM, () => c.dead), { title: 'Peptide backbone', kv: [], desc: 'The repeating nitrogen–carbon–carbon chain shared by every amino acid, linked by peptide bonds.' }, { parent: res }),
+        part(`Side chain of ${AMINO_NAMES[aa]}`, anchored(q, 0.25 * NM, () => c.dead), { title: 'Side chain', kv: [['Amino acid', AMINO_NAMES[aa]]], desc: 'The part that differs between amino acids and gives each its chemistry.' }, { parent: res }),
+      ];
+      return out(res);
+    }
     if (s.mtOf) {
       if (8 * NM * renderer.ppu < 3) return null;
       const { c, k } = s.mtOf, m = microtubules(c, c._anat)[k];
@@ -991,7 +1111,10 @@ export function childAt(s, p, tol, world, renderer) {
         title: 'α/β-tubulin dimer', kv: [['Length', '8 nm'], ['Binds', 'GTP']], desc: 'The brick of every microtubule. Dimers stack head-to-tail into protofilaments; 13 of those make the tube.',
       }, { parent: s }));
     }
-    return out(smallestHit(s.kids ? flatten(s.kids()) : [], p, tol, sizeOf(s) || Infinity));
+    if (s.wallOf) return out(wallNodeAt(s, p, tol, pxnm));
+    // Compact things (drawn on top) before thin strands running underneath them.
+    const kidsList = s.kids ? flatten(s.kids()) : [], lim = sizeOf(s) || Infinity;
+    return out(smallestHit(kidsList.filter((k) => !k.shape), p, tol, lim) || smallestHit(kidsList.filter((k) => k.shape), p, tol, lim));
   }
   return null;
 }

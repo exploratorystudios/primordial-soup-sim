@@ -232,3 +232,9 @@ export function membraneProteinAt(c, k) {
   if ((h & 3) !== 0) return null; // ~1 in 4 slots holds a protein
   return MEMBRANE_PROTEINS[(h >>> 4) % (c.mito ? 5 : 4)];
 }
+
+// Peptidoglycan wall geometry: glycan-strand layers ~4 nm apart, cross-links every ~4 nm, sugar
+// units every ~1 nm along a strand.
+export const WALL_LINK = 4 * NM, WALL_UNIT = 1 * NM;
+export function wallLayers(wall) { return Math.max(1, Math.round(wall / (4 * NM))); }
+export function wallLayerR(c, wall, i) { const n = wallLayers(wall); return c.r + 2 * NM + (n === 1 ? wall / 2 : (i + 0.5) * (wall / n)); }

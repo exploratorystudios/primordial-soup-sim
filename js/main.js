@@ -85,6 +85,7 @@ function frameStep() {
   // A strand inside a protocell: place it for this frame before aiming the camera at it.
   for (let q = sel; q; q = q.parent) if (q.kind === 'polymer' && q.obj.home && !q.obj.home.dead) renderer.placeInternal(q.obj, q.obj.home);
   opts.selected = sel && !sel.gone ? sel.obj : null;
+  opts.selection = sel && !sel.gone ? sel : null;
   if (flight) fly(dt);
   else if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }

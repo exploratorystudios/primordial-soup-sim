@@ -6,7 +6,8 @@
 import { CFG } from './config.js';
 import { LIPID, BASES } from './chemistry.js';
 import { RNG } from './rng.js';
-import { buildAnatomy, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
+import { ribosomeModel, ribosomeAngle, AMINO } from './ribosome.js';
+import { wallLayers, wallLayerR, WALL_LINK, WALL_UNIT, buildAnatomy, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
 
 export const NM_PER_UNIT = 500;
 const NM = 1 / NM_PER_UNIT; // world units per nanometre
@@ -190,7 +191,8 @@ export class Renderer {
     this.drawLife(world, opts);
     this.drawViruses(world);
 
-    if (opts.selected) this.drawSelection(opts.selected);
+    if (opts.selection) this.drawSelection(opts.selection);
+    else if (opts.selected) this.drawSelection(opts.selected);
     if (opts.flash) {
       const f = opts.flash;
       ctx.fillStyle = `rgba(255,160,60,${f.a * 0.5})`;
@@ -709,9 +711,12 @@ export class Renderer {
       const armor = c.armor * (c.type === 4 ? 3 : 1);
       if (armor > 0.15) {
         const wall = (20 + armor * 80) * NM;
-        ctx.strokeStyle = 'rgba(205,165,105,0.85)';
-        ctx.lineWidth = Math.max(wall, px);
-        if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
+        if (this.pxnm >= 1.5) this.drawWallMesh(c, wall);
+        else {
+          ctx.strokeStyle = 'rgba(205,165,105,0.85)';
+          ctx.lineWidth = Math.max(wall, px);
+          if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
+        }
       }
       if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
       else if (rp > 3 || c.mito) {
@@ -752,8 +757,13 @@ export class Renderer {
     const big = (units) => units * ppu > 1.5; // worth drawing at this zoom
     // Ribosomes (~22 nm): the protein factories filling the cytoplasm.
     const rib = (DIM.ribosome * NM) / 2;
-    const drawRibos = (pts) => {
+    const drawRibos = (pts, seedBase) => {
       if (rib * 2 * ppu < 0.8) return;
+      if (rib * 2 * ppu >= 40) {
+        // Close enough to see the machinery: draw each on-screen ribosome as a molecular model.
+        pts.forEach((q, k) => { if (this.inView(q.x, q.y, rib * 3)) this.drawRibosomeModel(q.x, q.y, seedBase + k, c.mito); });
+        return;
+      }
       const rr = Math.max(rib, 0.5 * px);
       ctx.fillStyle = 'rgba(30,20,50,0.55)';
       ctx.beginPath();
@@ -768,7 +778,7 @@ export class Renderer {
     };
     const free = [];
     for (let k = 0; k < a.ribo.length; k += 2) free.push({ x: c.x + a.ribo[k] * r, y: c.y + a.ribo[k + 1] * r });
-    drawRibos(free);
+    drawRibos(free, c.id * 4099);
     const blob = (fx, fy, rad, fill, stroke) => {
       ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(X + fx * r, Y + fy * r, rad, 0, TAU); ctx.fill();
       if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = line(7); ctx.stroke(); }
@@ -806,7 +816,7 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(190,170,230,0.35)';
     ctx.lineWidth = line(50);
     for (const e of a.er) { ctx.beginPath(); ctx.arc(X, Y, e.rr * r, e.a0, e.a0 + e.span); ctx.stroke(); }
-    if (rib * 2 * ppu >= 0.8) drawRibos(erRibosomes(c, a));
+    if (rib * 2 * ppu >= 0.8) drawRibos(erRibosomes(c, a), c.id * 4099 + 100000);
     // Golgi apparatus: a stack of flattened cisternae, budding transport vesicles.
     ctx.strokeStyle = 'rgba(255,200,120,0.85)';
     ctx.lineWidth = line(30);
@@ -915,6 +925,89 @@ export class Renderer {
       ctx.restore();
     }
     this.drawInfection(c);
+  }
+
+  // Peptidoglycan cell wall up close: layers of glycan strands (sugar chains) tied together by short
+  // peptide cross-links, a molecular mesh like chain mail. Only the visible stretch is drawn.
+  drawWallMesh(c, wall) {
+    const ctx = this.ctx, v = this.v, X = c.x - this.cam.x, Y = c.y - this.cam.y;
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    const R0 = c.r + 2 * NM, n = wallLayers(wall);
+    if (d - half > R0 + wall || d + half < R0) return;
+    const { mid, phi } = this.visibleArc(X, Y, R0 + wall / 2, d, half);
+    ctx.fillStyle = 'rgba(205,165,105,0.18)';
+    ctx.beginPath(); ctx.arc(X, Y, R0 + wall, mid - phi, mid + phi); ctx.arc(X, Y, R0, mid + phi, mid - phi, true); ctx.fill();
+    ctx.strokeStyle = 'rgba(225,190,120,0.95)';
+    ctx.lineWidth = 1 * NM;
+    for (let i = 0; i < n; i++) { ctx.beginPath(); ctx.arc(X, Y, wallLayerR(c, wall, i), mid - phi, mid + phi); ctx.stroke(); }
+    // Cross-links between neighbouring layers, every ~4 nm, staggered.
+    ctx.strokeStyle = 'rgba(160,220,140,0.9)';
+    ctx.lineWidth = 0.5 * NM;
+    ctx.beginPath();
+    for (let i = 0; i + 1 < n; i++) {
+      const r1 = wallLayerR(c, wall, i), r2 = wallLayerR(c, wall, i + 1), da = WALL_LINK / r1, off = (i % 2) * 0.5;
+      for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+        const a = (k + off) * da;
+        ctx.moveTo(X + Math.cos(a) * r1, Y + Math.sin(a) * r1); ctx.lineTo(X + Math.cos(a) * r2, Y + Math.sin(a) * r2);
+      }
+    }
+    ctx.stroke();
+    if (this.pxnm >= 6) {
+      // Individual NAG–NAM sugar units along each strand (~1 nm each).
+      ctx.fillStyle = 'rgba(255,230,170,0.95)';
+      for (let i = 0; i < n; i++) {
+        const R = wallLayerR(c, wall, i), da = WALL_UNIT / R;
+        ctx.beginPath();
+        for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) { const a = k * da, x = X + Math.cos(a) * R, y = Y + Math.sin(a) * R; ctx.moveTo(x + 0.35 * NM, y); ctx.arc(x, y, 0.35 * NM, 0, TAU); }
+        ctx.fill();
+      }
+    }
+  }
+
+  // A translating ribosome: two subunits of folded rRNA studded with proteins, a messenger RNA
+  // threading between them, transfer RNAs in the A, P and E sites, and the new protein leaving
+  // through the exit tunnel. Representative, at true scale (see ribosome.js).
+  drawRibosomeModel(x, y, seed, euk) {
+    const ctx = this.ctx, m = ribosomeModel(seed, euk), pxnm = this.pxnm;
+    this.nmFrame(x, y, ribosomeAngle(seed));
+    const path = (pts, w, col) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = 'round';
+      ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.stroke();
+    };
+    const bases = (pts, r) => { for (const q of pts) { ctx.fillStyle = MONO_COLORS[q.b]; ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, TAU); ctx.fill(); } };
+    // Subunit bodies.
+    ctx.fillStyle = 'rgba(70,50,110,0.45)';
+    ctx.beginPath(); ctx.ellipse(m.L.cx, m.L.cy, m.L.rx, m.L.ry, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'rgba(120,100,170,0.45)';
+    ctx.beginPath(); ctx.ellipse(m.S.cx, m.S.cy, m.S.rx, m.S.ry, 0, 0, TAU); ctx.fill();
+    // Ribosomal RNA: the folded chains that make up most of the ribosome.
+    path(m.rnaL, 0.9, 'rgba(200,160,255,0.85)');
+    path(m.rna5S, 0.9, 'rgba(255,200,240,0.9)');
+    path(m.rnaS, 0.9, 'rgba(225,200,255,0.85)');
+    if (pxnm >= 6) { bases(m.rnaL, 0.22); bases(m.rna5S, 0.22); bases(m.rnaS, 0.22); }
+    // Ribosomal proteins on the surface.
+    for (const pr of [...m.protL, ...m.protS]) {
+      ctx.fillStyle = 'rgba(110,200,175,0.9)';
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, pr.r, 0, TAU); ctx.fill();
+      if (pxnm >= 12) {
+        // Amino-acid texture of a folded protein.
+        ctx.fillStyle = 'rgba(40,120,100,0.6)';
+        for (let k = 0; k < 14; k++) { const a = k * 2.4, rr = pr.r * Math.sqrt((k + 0.5) / 14) * 0.85; ctx.beginPath(); ctx.arc(pr.x + Math.cos(a) * rr, pr.y + Math.sin(a) * rr, 0.22, 0, TAU); ctx.fill(); }
+      }
+    }
+    // Messenger RNA running through the decoding groove.
+    path(m.mrna, 0.45, 'rgba(255,157,232,0.95)');
+    if (pxnm >= 5) for (const q of m.mrna) { ctx.fillStyle = MONO_COLORS[q.b]; ctx.fillRect(q.x - 0.14, q.y - 0.9, 0.28, 0.75); }
+    // Transfer RNAs (L-shaped), each carrying an amino acid.
+    for (const t of m.trna) {
+      path(t.pts, 1.5, t.site === 'P' ? 'rgba(255,180,84,0.95)' : t.site === 'A' ? 'rgba(255,214,120,0.9)' : 'rgba(220,160,90,0.75)');
+      const end = t.pts[t.pts.length - 1];
+      if (t.site !== 'E') { ctx.fillStyle = `hsl(${(AMINO.indexOf(t.aa) * 18) % 360},70%,60%)`; ctx.beginPath(); ctx.arc(end.x + 0.4, end.y + 0.3, 0.45, 0, TAU); ctx.fill(); }
+      if (pxnm >= 8) for (let i = 0; i < 3; i++) { ctx.fillStyle = MONO_COLORS[t.anticodon[i]]; ctx.fillRect(t.x - 0.9 + i * 0.6 - 0.14, t.pts[0].y - 0.1, 0.28, 0.6); }
+    }
+    // The new protein chain leaving the exit tunnel.
+    for (const q of m.peptide) { ctx.fillStyle = `hsl(${(AMINO.indexOf(q.aa) * 18) % 360},65%,62%)`; ctx.beginPath(); ctx.arc(q.x, q.y, 0.24, 0, TAU); ctx.fill(); }
+    ctx.restore();
   }
 
   // Tubulin dimers (8 nm) along microtubules, only near the camera.
@@ -1087,15 +1180,43 @@ export class Renderer {
     if (nj) { ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = Math.max(DIM.junction * NM, 1.5 * this.px); ctx.stroke(joints); }
   }
 
+  // Highlight a selection along its real outline: a whole membrane ring, a thin structure along its
+  // length, or a circle around a compact thing.
   drawSelection(sel) {
-    const ctx = this.ctx;
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, px = this.px;
+    const o = sel.obj || sel;
+    ctx.save();
     ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5 * this.px;
-    ctx.setLineDash([4 * this.px, 3 * this.px]);
-    ctx.beginPath();
-    ctx.arc((sel._rx ?? sel.x) - this.cam.x, (sel._ry ?? sel.y) - this.cam.y, (sel.r || sel._rad || 0) + 5 * this.px, 0, TAU);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.lineWidth = 1.5 * px;
+    ctx.setLineDash([4 * px, 3 * px]);
+    if (sel.outline) {
+      const ol = sel.outline();
+      ctx.beginPath();
+      if (ol.type === 'ellipse') ctx.ellipse(ol.x - cx, ol.y - cy, ol.rx + 4 * px, ol.ry + 4 * px, ol.ang, 0, TAU);
+      else { if (this.bigRing(ol.x - cx, ol.y - cy, ol.r + 4 * px)) ctx.stroke(); if (this.bigRing(ol.x - cx, ol.y - cy, Math.max(0, ol.r - (ol.w || 0) - 4 * px))) ctx.stroke(); ctx.restore(); return; }
+      ctx.stroke();
+    } else if (sel.shape) {
+      // Two dashed rails along the structure.
+      ctx.lineWidth = 1.2 * px;
+      const off = sel.shape.w / 2 + 3 * px;
+      for (const pts of sel.shape.lines()) {
+        for (const side of [-1, 1]) {
+          ctx.beginPath();
+          for (let i = 0; i < pts.length; i++) {
+            const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+            const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+            const x = pts[i].x - cx - (dy / d) * off * side, y = pts[i].y - cy + (dx / d) * off * side;
+            if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+    } else {
+      ctx.beginPath();
+      ctx.arc((o._rx ?? o.x) - cx, (o._ry ?? o.y) - cy, (o.r || o._rad || 0) + 5 * px, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawScaleBar() {
