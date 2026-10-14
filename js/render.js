@@ -24,6 +24,7 @@ export const DIM = {
   junction: 40,
   mitoLen: 1000, mitoW: 500,
   nuclearPore: 100, nuclearGap: 30,
+  virus: 50,          // capsid radius (a ~100 nm phage head)
 };
 
 export const MONO_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#efe6c4'];
@@ -136,6 +137,7 @@ export class Renderer {
     const ctx = this.ctx, cv = this.canvas, cw = cv.width, ch = cv.height;
     const ppu = this.ppu, cx = this.cam.x, cy = this.cam.y;
     this.frame++;
+    this.time = opts.time ?? world.t;
     this.px = 1 / ppu;          // one device pixel, in world units
     this.pxnm = ppu * NM;       // device pixels per nanometre
     this.v = { x0: cx - cw / 2 / ppu, x1: cx + cw / 2 / ppu, y0: cy - ch / 2 / ppu, y1: cy + ch / 2 / ppu };
@@ -432,16 +434,15 @@ export class Renderer {
     for (const p of ve.polys) {
       if (p._fx === undefined) {
         const a = Math.random() * TAU, rr = Math.sqrt(Math.random()) * 0.8;
-        p._fx = Math.cos(a) * rr; p._fy = Math.sin(a) * rr; p._fa = Math.random() * TAU;
+        p._fx = Math.cos(a) * rr; p._fy = Math.sin(a) * rr; p._fa = Math.random() * TAU; p._ph = Math.random() * TAU;
       }
-      // Gentle drift (~0.3 nm per frame) so contents stay watchable at molecular zoom.
-      const j = (0.6 * NM) / inner;
-      p._fx += (Math.random() - 0.5) * j; p._fy += (Math.random() - 0.5) * j; p._fa += (Math.random() - 0.5) * 0.01;
-      const d = Math.hypot(p._fx, p._fy);
-      if (d > 0.85) { p._fx *= 0.85 / d; p._fy *= 0.85 / d; }
-      const px = ve.x + p._fx * inner, py = ve.y + p._fy * inner;
+      // Gentle wandering that depends only on simulation time, so it freezes when paused.
+      const t = this.time, w = (2 * NM) / inner;
+      const fx = p._fx + Math.sin(t * 0.031 + p._ph) * w, fy = p._fy + Math.cos(t * 0.027 + p._ph * 1.7) * w;
+      p._drawFa = p._fa + Math.sin(t * 0.013 + p._ph) * 0.6;
+      const px = ve.x + fx * inner, py = ve.y + fy * inner;
       p.x = px; p.y = py; // keep the inspector/camera on it
-      if (this.inView(px, py, 0.05)) this.drawPolymer(p, px, py, p._fa);
+      if (this.inView(px, py, 0.05)) this.drawPolymer(p, px, py, p._drawFa);
     }
     if (molecular) {
       // Free nucleotides waiting in the protocell's internal pool.

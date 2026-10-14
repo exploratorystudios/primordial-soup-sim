@@ -162,7 +162,7 @@ function vesicleParts(s, renderer) {
     title: 'Fatty-acid bilayer',
     kv: [['Thickness', '≈ 4 nm'], ['Diameter', um(v.r * 2)], ['Molecules (3D estimate)', lipidCount(v.r, 0.3)]],
     desc: 'Two layers of fatty acids, tails inward. Leaky enough to let nucleotides diffuse in, tight enough to keep RNA chains trapped.',
-  }, { parent: s });
+  }, { parent: s, ring: { c: v, phospho: false, label: 'A fatty acid in the membrane' } });
   mem.kids = () => [membraneLipid(() => v.x, () => v.y, () => v.r, 0, dead, mem, 'A fatty acid in the membrane')];
   out.push(mem);
   for (const p of v.polys) {
@@ -174,7 +174,7 @@ function vesicleParts(s, renderer) {
     const g = part(`Free ${BASES[t]} nucleotides`, anchored(() => v, v.r * 0.6, dead), {
       title: `Pool of ${NT_INFO[t].name}`, kv: [['Count (simulated)', String(v.pool[t])]],
       desc: 'Nucleotides that diffused in through the membrane, waiting to be built into RNA.',
-    }, { parent: s, note: `×${v.pool[t]}` });
+    }, { parent: s, group: true, note: `×${v.pool[t]}` });
     g.kids = () => {
       const out2 = [];
       for (let k = 0; k < Math.min(v.pool[t], 5); k++) {
@@ -203,7 +203,7 @@ function cellParts(s, world, renderer) {
     title: 'Plasma membrane (phospholipid bilayer)',
     kv: [['Thickness', '≈ 4 nm'], ['Lipid molecules (estimate)', lipidCount(c.r, 0.65)]],
     desc: 'Phospholipids with two tails each, studded with transport and energy proteins. It holds the proton gradient that powers ATP synthesis.',
-  }, { parent: s });
+  }, { parent: s, ring: { c, phospho: true, label: 'A phospholipid in the membrane' } });
   mem.kids = () => [membraneLipid(() => c.x, () => c.y, () => c.r, 0, dead, mem, 'A phospholipid in the membrane', true)];
   out.push(mem);
 
@@ -234,7 +234,7 @@ function cellParts(s, world, renderer) {
     const nuc = part('Nucleus', at(0, 0, c.r * 0.34), {
       title: 'Nucleus', kv: [['Diameter', um(c.r * 0.68)], ['Envelope', 'two membranes, 30 nm apart']],
       desc: 'Walls the genome off from the cytoplasm, a defining feature of eukaryotes.',
-    }, { parent: s });
+    }, { parent: s, nucleusOf: c });
     genome.parent = nuc; // in eukaryotes the genome lives inside the nucleus
     nuc.kids = () => [
       part('Nuclear envelope & pores', at(0.34, 0, DIM.nuclearPore * NM), { title: 'Nuclear envelope', kv: [['Pore diameter', '≈ 100 nm'], ['Gap between membranes', '≈ 30 nm']], desc: 'A double membrane perforated by pore complexes, gates that let RNA out and proteins in.' }, { parent: nuc }),
@@ -252,7 +252,7 @@ function cellParts(s, world, renderer) {
     title: `Ribosomes (${c.mito ? '80S' : '70S'})`,
     kv: [['Size', c.mito ? '≈ 25–30 nm' : '≈ 22 nm'], ['In this cell (estimate)', `≈ ${Math.round(volUm3 * 20000).toLocaleString()}`], ['Drawn (2D slice)', String(nRib)]],
     desc: 'Molecular machines that read messenger RNA and build proteins. They are largely made of RNA, a living echo of the RNA world.',
-  }, { parent: s, note: `≈ ${Math.round(volUm3 * 20000).toLocaleString()}` });
+  }, { parent: s, group: true, note: `≈ ${Math.round(volUm3 * 20000).toLocaleString()}` });
   ribs.kids = () => {
     const list = [];
     for (let k = 0; k < Math.min(nRib, 8); k++) list.push(ribosome(c, k, at, ribs));
@@ -274,14 +274,14 @@ function cellParts(s, world, renderer) {
     const mg = part(`Mitochondria`, at(a.mitos[0].fx, a.mitos[0].fy, c.r * 0.5), {
       title: 'Mitochondria', kv: [['Count (drawn)', String(a.mitos.length)], ['Aerobic gene', c.aer.toFixed(2)]],
       desc: 'Descendants of an aerobic bacterium engulfed by this lineage’s ancestor (endosymbiosis). They burn food with oxygen for far more energy.',
-    }, { parent: s, note: `×${a.mitos.length}` });
+    }, { parent: s, group: true, note: `×${a.mitos.length}` });
     mg.kids = () => a.mitos.map((m, k) => mitochondrion(c, m, k, at, mg));
     out.push(mg);
     if (a.plast.length) {
       const pg = part('Chloroplasts', at(a.plast[0].fx, a.plast[0].fy, c.r * 0.5), {
         title: 'Chloroplasts', kv: [['Count (drawn)', String(a.plast.length)]],
         desc: 'Descendants of a photosynthetic bacterium kept by a eukaryote: this lineage is an alga.',
-      }, { parent: s, note: `×${a.plast.length}` });
+      }, { parent: s, group: true, note: `×${a.plast.length}` });
       pg.kids = () => a.plast.map((p, k) => chloroplast(c, p, k, at, pg));
       out.push(pg);
     }
@@ -419,7 +419,7 @@ function organismParts(s, world) {
   return [...byType.entries()].map(([t, cells]) => {
     const g = part(`${TYPE_NAMES[t]} cells`, anchored(() => cells[0], cells[0].r, () => cells[0].dead), {
       title: `${TYPE_NAMES[t]} cells`, kv: [['Count', String(cells.length)]], desc: FATE_DESC[t],
-    }, { parent: s, note: `×${cells.length}` });
+    }, { parent: s, group: true, note: `×${cells.length}` });
     g.kids = () => cells.map((c) => sel('cell', c, { parent: s, label: `Cell #${c.id}`, note: `${c.bonds.length} junctions` }));
     return g;
   });
@@ -484,64 +484,132 @@ export function crumbLabel(s) {
   return s.kind;
 }
 
-// When zoomed in, a click inside a selected-level object resolves to the deepest visible part.
-export function refine(s, p, tol, world, renderer) {
-  const pxnm = renderer.ppu / NM_PER_UNIT;
-  const pick = (cands) => {
-    let best = null, br = Infinity;
-    for (const c of cands) {
-      const d = Math.hypot(c.obj.x - p.x, c.obj.y - p.y);
-      if (d <= c.obj.r + tol && c.obj.r < br) { br = c.obj.r; best = c; }
-    }
-    return best;
-  };
-  const ringHit = (cx, cy, R) => Math.abs(Math.hypot(p.x - cx, p.y - cy) - R) < DIM.bilayer * NM + tol;
-  const lipidAt = (cx, cy, R, parent, label, phospho) => membraneLipid(() => cx, () => cy, () => R, Math.atan2(p.y - cy, p.x - cx), () => parent.obj.dead, parent, label, phospho);
+// ---------------------------------------------------------- nested picking
+// Selection works like nested groups: the first click selects the outermost thing; clicking again
+// inside the current selection goes one level deeper (list-only groups are skipped); clicking inside
+// an ancestor selects the sibling under the cursor; clicking outside starts over.
 
+const flatten = (kids) => kids.flatMap((k) => (k.group && k.kids ? k.kids() : [k]));
+const dist = (s, p) => Math.hypot(s.obj.x - p.x, s.obj.y - p.y);
+const radius = (s) => s.obj.r ?? s.obj._rad ?? 0;
+
+function smallestHit(cands, p, tol, maxR = Infinity) {
+  let best = null, br = Infinity;
+  for (const c of cands) {
+    const r = radius(c);
+    if (r >= maxR || dist(c, p) > r + tol) continue;
+    if (r < br) { br = r; best = c; }
+  }
+  return best;
+}
+
+export function contains(s, p, tol) {
+  return !!s && !s.gone && !s.obj.dead && dist(s, p) <= radius(s) + tol;
+}
+
+// The outermost object under the cursor.
+export function topLevelAt(world, p, tol, showChem) {
+  const cands = [];
+  for (const c of world.life.cells) {
+    if (Math.hypot(c.x - p.x, c.y - p.y) > c.r + tol) continue;
+    cands.push(c.orgSize > 1 ? organismOf(c, world) : sel('cell', c));
+  }
+  if (world.viruses) {
+    for (const v of world.viruses.list) {
+      if (Math.hypot(v.x - p.x, v.y - p.y) <= DIM.virus * NM + tol) cands.push(sel('virus', Object.assign(v, { r: DIM.virus * NM })));
+    }
+  }
+  if (showChem) {
+    const soup = world.soup;
+    for (const v of soup.vesicles) if (Math.hypot(v.x - p.x, v.y - p.y) <= v.r + tol) cands.push(sel('vesicle', v));
+    for (const q of soup.polymers) {
+      q._rad = (q.seq.length * DIM.ntRise * NM) / 2;
+      if (Math.hypot(q.x - p.x, q.y - p.y) <= q._rad + tol) cands.push(sel('polymer', q));
+    }
+    for (let i = 0; i < soup.n; i++) {
+      const dx = soup.mx[i] - p.x, dy = soup.my[i] - p.y;
+      if (Math.abs(dx) > tol + NM || Math.abs(dy) > tol + NM) continue;
+      const st = { mid: soup.mid[i], x: soup.mx[i], y: soup.my[i], ang: (soup.mid[i] * 2.399) % TAU, gone: false };
+      cands.push(molecule(soup.mt[i], () => st, () => st.gone, null, { st }));
+    }
+  }
+  let best = null;
+  for (const c of cands) if (!best || radius(c) < radius(best)) best = c;
+  if (best) best.follow = false;
+  return best;
+}
+
+// The part of s directly under the cursor (one level down), or null.
+export function childAt(s, p, tol, world, renderer) {
+  const pxnm = renderer.ppu / NM_PER_UNIT;
+  const out = (c) => { if (c) c.follow = false; return c; };
+  if (s.kind === 'organism') {
+    return out(smallestHit(s.members().map((c) => sel('cell', c, { parent: s })), p, tol));
+  }
   if (s.kind === 'cell') {
     const c = s.obj;
-    if (c.r * renderer.ppu < 14) return s;
-    if (ringHit(c.x, c.y, c.r)) {
-      const mem = cellParts(s, world, renderer)[0];
-      if (DIM.lipidSpacing * pxnm >= 2.5) return refine(lipidAt(c.x, c.y, c.r, mem, 'A phospholipid in the membrane', true), p, tol, world, renderer);
-      return mem;
-    }
+    if (c.r * renderer.ppu < 14) return null; // too small on screen to show its parts
     const kids = cellParts(s, world, renderer);
-    const flat = [];
-    for (const k of kids) {
-      if (/^(Mitochondria|Chloroplasts|Ribosomes|Nucleus)$/.test(k.label)) for (const kk of k.kids()) flat.push(kk);
-      else if (!/Plasma membrane|Cytoplasm|junctions|Cell wall/.test(k.label)) flat.push(k);
-    }
-    // Topmost first: organelles, then ribosomes, then the chromosome region behind them.
+    const d = Math.hypot(p.x - c.x, p.y - c.y);
+    if (Math.abs(d - c.r) < DIM.bilayer * NM + tol) return out(kids[0]);
+    if (d > c.r) return out(kids.find((k) => k.label === 'Cell wall') || null);
     const isGenome = (k) => /Chromosome/.test(k.label);
-    const organelle = pick(flat.filter((k) => !isGenome(k)));
-    if (organelle) return organelle;
+    const organelles = flatten(kids).filter((k) => !k.ring && !/Cytoplasm|junctions|Cell wall|Ribosome /.test(k.label) && !isGenome(k));
+    const hit = smallestHit(organelles, p, tol);
+    if (hit) return out(hit);
+    const a = c._anat, ribs = kids.find((k) => k.label === 'Ribosomes');
     if (DIM.ribosome * pxnm >= 3) {
-      const a = c._anat;
+      const at = (fx, fy, r) => anchored(() => ({ x: c.x + fx * c.r, y: c.y + fy * c.r }), r, () => c.dead);
       for (let k = 0; k < a.ribo.length / 2; k++) {
-        const x = c.x + a.ribo[k * 2] * c.r, y = c.y + a.ribo[k * 2 + 1] * c.r;
-        if (Math.hypot(x - p.x, y - p.y) < DIM.ribosome * NM + tol) {
-          return ribosome(c, k, (fx, fy, r) => anchored(() => ({ x: c.x + fx * c.r, y: c.y + fy * c.r }), r, () => c.dead), kids.find((q) => q.label === 'Ribosomes'));
+        if (Math.hypot(c.x + a.ribo[k * 2] * c.r - p.x, c.y + a.ribo[k * 2 + 1] * c.r - p.y) < DIM.ribosome * NM + tol) return out(ribosome(c, k, at, ribs));
+      }
+    }
+    return out(smallestHit(kids.filter(isGenome), p, tol) || kids.find((k) => k.label === 'Cytoplasm'));
+  }
+  if (s.kind === 'vesicle') {
+    const v = s.obj, kids = vesicleParts(s, renderer);
+    const d = Math.hypot(p.x - v.x, p.y - v.y);
+    if (Math.abs(d - v.r) < DIM.bilayer * NM + tol) return out(kids[0]);
+    const strands = kids.filter((k) => k.kind === 'polymer' && k.obj._fx !== undefined);
+    for (const k of strands) k.obj._rad = (k.obj.seq.length * DIM.ntRise * NM) / 2;
+    const hit = smallestHit(strands, p, tol);
+    if (hit) return out(hit);
+    if (pxnm >= 2.5) {
+      const inner = v.r - DIM.bilayer * NM;
+      for (let t = 0; t < 4; t++) {
+        const group = kids.find((k) => k.label === `Free ${BASES[t]} nucleotides`);
+        for (let k = 0; k < Math.min(v.pool[t], 40); k++) {
+          const seed = (v.id * 7919 + t * 131 + k * 17) >>> 0;
+          const frame = () => { const r = renderer.rngFor(seed), a = r.next() * TAU, rr = Math.sqrt(r.next()) * 0.85; return { x: v.x + Math.cos(a) * rr * inner, y: v.y + Math.sin(a) * rr * inner, ang: r.next() * TAU }; };
+          const m = molecule(t, frame, () => v.dead, group || s);
+          if (dist(m, p) < m.obj.r + tol) return out(m);
         }
       }
     }
-    return pick(flat.filter(isGenome)) || s;
+    return null;
   }
-  if (s.kind === 'vesicle') {
-    const v = s.obj;
-    if (ringHit(v.x, v.y, v.r)) {
-      const mem = vesicleParts(s, renderer)[0];
-      if (DIM.lipidSpacing * pxnm >= 2.5) return refine(lipidAt(v.x, v.y, v.r, mem, 'A fatty acid in the membrane'), p, tol, world, renderer);
-      return mem;
+  if (s.kind === 'polymer') {
+    if (pxnm < 4) return null;
+    return out(smallestHit(polymerParts(s, renderer).filter((k) => k.kind === 'molecule'), p, tol));
+  }
+  if (s.kind === 'molecule' || s.kind === 'virus') {
+    if (pxnm < 10) return null;
+    return out(smallestHit(children(s, world, renderer), p, tol));
+  }
+  if (s.kind === 'part') {
+    if (s.ring) {
+      // A membrane: drill into the individual lipid under the cursor once lipids are resolvable.
+      if (DIM.lipidSpacing * pxnm < 2.5) return null;
+      const o = s.ring.c;
+      return out(membraneLipid(() => o.x, () => o.y, () => o.r, Math.atan2(p.y - o.y, p.x - o.x), () => o.dead, s, s.ring.label, s.ring.phospho));
     }
-    return s;
+    if (s.nucleusOf) {
+      const c = s.nucleusOf, nr = c.r * 0.34, kids = s.kids();
+      const d = Math.hypot(p.x - c.x, p.y - c.y);
+      if (Math.abs(d - nr) < (DIM.nuclearGap + 20) * NM + tol) return out(kids[0]);
+      return out(smallestHit([kids[1]], p, tol) || kids[2]);
+    }
+    return out(smallestHit(s.kids ? flatten(s.kids()) : [], p, tol, s.obj.r || Infinity));
   }
-  if (s.kind === 'polymer' && pxnm >= 4) {
-    const hit = pick(polymerParts(s, renderer).filter((k) => k.kind === 'molecule'));
-    return hit ? refine(hit, p, tol, world, renderer) : s;
-  }
-  if (s.kind === 'molecule' && pxnm >= 12) {
-    return pick(moleculeParts(s)) || s;
-  }
-  return s;
+  return null;
 }

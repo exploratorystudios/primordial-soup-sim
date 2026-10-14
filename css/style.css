@@ -143,3 +143,6 @@ button.wide { width: 100%; margin-top: 8px; }
 .parts li:hover { background: var(--panel-2); color: var(--accent); }
 .parts li span:first-child::before { content: "▸ "; color: var(--muted); }
 .gone { color: var(--accent-2); }
+
+.crumbs .follow { float: right; padding: 2px 8px; font-size: 11px; margin-left: 6px; }
+.crumbs .follow.on { border-color: var(--accent); color: var(--accent); }

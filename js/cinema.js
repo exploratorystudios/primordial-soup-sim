@@ -222,9 +222,10 @@ export class Cinema {
         const p = s.p, v = s.v;
         if (v.dead || !v.polys.includes(p)) { if (!s.lost) s.lost = { x: R.cam.x, y: R.cam.y }; }
         // Compute where the renderer will place the strand inside its (moving) protocell this frame.
-        if (p._fx === undefined) { p._fx = 0.2; p._fy = -0.1; p._fa = 0.3; }
-        const inner = v.r - DIM.bilayer * NM;
-        const target = s.lost || { x: v.x + p._fx * inner, y: v.y + p._fy * inner };
+        if (p._fx === undefined) { p._fx = 0.2; p._fy = -0.1; p._fa = 0.3; p._ph = 1; }
+        const inner = v.r - DIM.bilayer * NM, tt = w.t, ww = (2 * NM) / inner;
+        const fx = p._fx + Math.sin(tt * 0.031 + p._ph) * ww, fy = p._fy + Math.cos(tt * 0.027 + p._ph * 1.7) * ww;
+        const target = s.lost || { x: v.x + fx * inner, y: v.y + fy * inner };
         if (u < 0.5) this.setCam(target.x, target.y, 26);
         else {
           // Reverse dive: pan in proportion to the zoom so the strand stays in shot as we pull back.

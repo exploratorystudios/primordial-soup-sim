@@ -142,6 +142,7 @@ export class World {
 
   // --------------------------------------------------------------------- step
   step() {
+    this.capturePrev();
     this.dayFactor = 0.65 + 0.35 * Math.sin((this.t * 2 * Math.PI) / CFG.DAY_LENGTH);
     if (this.t % 20 === 0) this.updateCurrents();
     this.stepFields();
@@ -198,6 +199,44 @@ export class World {
       this.history = this.history.filter((_, i) => i % 2 === 0);
       this.historyEvery *= 2;
     }
+  }
+
+  // ----------------------------------------------------- smooth rendering
+  // Remember where things were at the start of the tick, so the renderer can show in-between frames.
+  capturePrev() {
+    for (const c of this.life.cells) { c.x0 = c.x; c.y0 = c.y; }
+    for (const p of this.soup.polymers) { p.x0 = p.x; p.y0 = p.y; p.a0 = p.ang; }
+    for (const v of this.soup.vesicles) { v.x0 = v.x; v.y0 = v.y; }
+    if (this.viruses) for (const v of this.viruses.list) { v.x0 = v.x; v.y0 = v.y; }
+  }
+
+  // Temporarily move everything to its interpolated position (alpha 0 = start of tick, 1 = end).
+  // Must be paired with endInterp(); the simulation never sees these positions.
+  beginInterp(alpha) {
+    this._interp = alpha < 0.999;
+    if (!this._interp) return;
+    const lerp = (a, b) => a + (b - a) * alpha;
+    const fix = (o) => { if (o.x0 === undefined) return; o._sx = o.x; o._sy = o.y; o.x = lerp(o.x0, o.x); o.y = lerp(o.y0, o.y); };
+    for (const c of this.life.cells) fix(c);
+    for (const p of this.soup.polymers) { fix(p); if (p.a0 !== undefined) { p._sa = p.ang; p.ang = lerp(p.a0, p.ang); } }
+    for (const v of this.soup.vesicles) fix(v);
+    if (this.viruses) for (const v of this.viruses.list) fix(v);
+    const s = this.soup, n = s.n;
+    if (!this._mx || this._mx.length < s.mx.length) { this._mx = new Float32Array(s.mx.length); this._my = new Float32Array(s.mx.length); }
+    this._simMx = s.mx; this._simMy = s.my;
+    for (let i = 0; i < n; i++) { this._mx[i] = lerp(s.px0[i], s.mx[i]); this._my[i] = lerp(s.py0[i], s.my[i]); }
+    s.mx = this._mx; s.my = this._my;
+  }
+
+  endInterp() {
+    if (!this._interp) return;
+    const back = (o) => { if (o._sx === undefined) return; o.x = o._sx; o.y = o._sy; o._sx = undefined; };
+    for (const c of this.life.cells) back(c);
+    for (const p of this.soup.polymers) { back(p); if (p._sa !== undefined) { p.ang = p._sa; p._sa = undefined; } }
+    for (const v of this.soup.vesicles) back(v);
+    if (this.viruses) for (const v of this.viruses.list) back(v);
+    this.soup.mx = this._simMx; this.soup.my = this._simMy;
+    this._interp = false;
   }
 
   // ------------------------------------------------------------------ events

@@ -2,7 +2,7 @@
 import { World } from './world.js';
 import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
-import { sel as mkSel, molecule, refine, fovFor } from './parts.js';
+import { fovFor, topLevelAt, childAt, contains, ancestors } from './parts.js';
 
 const SPEEDS = [0.25, 1, 2, 5, 10, 20, 50, 100, 250]; // ticks per frame
 const $ = (id) => document.getElementById(id);
@@ -20,6 +20,7 @@ let running = true;
 let speedIdx = 3;
 let frame = 0;
 let acc = 0;
+let alpha = 1; // how far between the previous and current tick to draw (smoothing at slow speeds)
 
 function setSpeed(i) {
   speedIdx = i;
@@ -45,20 +46,28 @@ function loop() {
     // Stay responsive: never spend more than ~30 ms simulating per frame.
     while (acc >= 1 && performance.now() - t0 < 30) { world.step(); acc--; }
     if (acc > 1) acc = 0;
+    alpha = SPEEDS[speedIdx] >= 1 ? 1 : acc;
   }
+  // Draw everything partway between ticks (the simulation itself never sees these positions).
+  world.beginInterp(alpha);
+  opts.time = world.t - 1 + alpha;
   const sel = ui.selected;
   if (sel) trackSelection(sel);
   opts.selected = sel && !sel.gone ? sel.obj : null;
-  if (sel && sel.follow && !sel.gone) { renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
+  if (sel && sel.follow && !sel.gone) {
+    const o = sel.offset || { x: 0, y: 0 };
+    renderer.cam.x = sel.obj.x + o.x; renderer.cam.y = sel.obj.y + o.y;
+  }
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }
   renderer.draw(world, opts);
   ui.update(world, frame);
+  world.endInterp();
   requestAnimationFrame(loop);
 }
 
 // ---------------------------------------------------------------- controls
 $('btn-play').onclick = () => { running = !running; $('btn-play').textContent = running ? 'Pause' : 'Play'; };
-$('btn-step').onclick = () => { world.step(); };
+$('btn-step').onclick = () => { world.step(); alpha = 1; };
 $('btn-fit').onclick = () => { renderer.fit(); if (ui.selected) ui.selected.follow = false; };
 // Zoom presets: jump to a physical field of view, centred on the selection if there is one.
 for (const b of document.querySelectorAll('[data-fov]')) {
@@ -67,7 +76,7 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     if (!fov) { $('btn-fit').click(); return; }
     renderer.setFieldWidthNm(fov);
     const sel = ui.selected;
-    if (sel && !sel.gone) { sel.follow = true; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
+    if (sel && !sel.gone) { sel.follow = true; sel.offset = { x: 0, y: 0 }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
   };
 }
 $('speed').oninput = (e) => setSpeed(+e.target.value);
@@ -86,7 +95,14 @@ $('tree-modal').onclick = (e) => { if (e.target.id === 'tree-modal') $('tree-mod
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); $('btn-play').click(); }
-  else if (e.key === 'Escape') { $('tree-modal').hidden = true; ui.select(world, null); }
+  else if (e.key === 'Escape') {
+    $('tree-modal').hidden = true;
+    // Go up one level; from the outermost level, deselect.
+    const s = ui.selected;
+    const up = s ? ancestors(s, world).at(-1) : null;
+    ui.select(world, up || null);
+  }
+  else if (e.key === 'f' || e.key === 'F') toggleFollow();
   else if (e.key === '+' || e.key === '=') setSpeed(Math.min(SPEEDS.length - 1, speedIdx + 1));
   else if (e.key === '-') setSpeed(Math.max(0, speedIdx - 1));
 });
@@ -127,7 +143,6 @@ canvas.addEventListener('pointerup', (e) => {
   }
   drag = null;
 });
-canvas.addEventListener('dblclick', () => { if (ui.selected && ui.selected.kind === 'cell') ui.selected.follow = true; });
 
 // Keep the selection's position current; molecules and polymers can vanish into other structures.
 function trackSelection(sel) {
@@ -146,45 +161,39 @@ function focus(s) {
   if (s.kind === 'polymer') s.obj._rad = polymerRadius(s.obj);
   ui.select(world, s);
   s.follow = true;
+  s.offset = { x: 0, y: 0 };
   renderer.setFieldWidthNm(fovFor(s));
   if (!s.obj.dead) { renderer.cam.x = s.obj.x; renderer.cam.y = s.obj.y; }
 }
 ui.onPick = focus;
 ui.renderer = renderer;
 
-// Pick the smallest object under the cursor, so you can click into a protocell to grab its RNA.
+// Nested selection: click selects the outermost thing; click again inside it to go one level deeper.
 function pick(p) {
-  const tol = (10 * renderer.dpr) / renderer.ppu;
-  const soup = world.soup;
-  let best = null, bestR = Infinity, bestD = Infinity;
-  const consider = (kind, obj, r, extra) => {
-    const d = Math.hypot(obj.x - p.x, obj.y - p.y);
-    if (d > r + tol) return;
-    if (r < bestR || (r === bestR && d < bestD)) { bestR = r; bestD = d; best = { kind, obj, follow: renderer.cam.zoom > 3, ...extra }; }
-  };
-  for (const c of world.life.cells) consider('cell', c, c.r);
-  if (opts.showChem) {
-    for (const v of soup.vesicles) {
-      consider('vesicle', v, v.r);
-      for (const q of v.polys) if (q._fx !== undefined) consider('polymer', q, polymerRadius(q), { parent: mkSel('vesicle', v) });
-    }
-    for (const q of soup.polymers) consider('polymer', q, polymerRadius(q));
-    for (let i = 0; i < soup.n; i++) {
-      const dx = soup.mx[i] - p.x, dy = soup.my[i] - p.y;
-      if (Math.abs(dx) > tol || Math.abs(dy) > tol) continue;
-      consider('monomer', { x: soup.mx[i], y: soup.my[i] }, 1 / NM_PER_UNIT, { mid: soup.mid[i], t: soup.mt[i] });
+  const tol = (6 * renderer.dpr) / renderer.ppu;
+  const cur = ui.selected;
+  if (cur && !cur.gone) {
+    const chain = [...ancestors(cur, world), cur];
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (!contains(chain[i], p, tol)) continue;
+      const child = childAt(chain[i], p, tol, world, renderer);
+      if (child) ui.select(world, child);
+      else if (i < chain.length - 1) ui.select(world, chain[i]); // inside a parent, between its parts
+      return; // inside the current selection but on nothing smaller: keep it
     }
   }
-  if (best && best.kind === 'monomer') {
-    const st = { mid: best.mid, x: best.obj.x, y: best.obj.y, ang: (best.mid * 2.399) % (Math.PI * 2), gone: false };
-    best = molecule(best.t, () => st, () => st.gone, null, { st });
-  }
-  if (best && best.kind === 'polymer') best.obj._rad = polymerRadius(best.obj);
-  // Zoomed in? Resolve the click to the deepest visible part (organelle, ribosome, lipid, nucleotide, atom group).
-  if (best) best = refine(best, p, tol, world, renderer);
-  if (best) best.follow = renderer.cam.zoom > 3;
-  ui.select(world, best);
+  ui.select(world, topLevelAt(world, p, tol, opts.showChem));
 }
+
+function toggleFollow() {
+  const s = ui.selected;
+  if (!s || s.gone) return;
+  s.follow = !s.follow;
+  // Keep the object where it is on screen instead of snapping it to the centre.
+  if (s.follow) s.offset = { x: renderer.cam.x - s.obj.x, y: renderer.cam.y - s.obj.y };
+  ui.lastHTML = null;
+}
+ui.onFollow = toggleFollow;
 
 function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT; }
 

@@ -12,6 +12,8 @@ export class Soup {
     this.cap = M;
     this.mx = new Float32Array(M);
     this.my = new Float32Array(M);
+    this.px0 = new Float32Array(M); // positions at the start of the tick, for smooth rendering
+    this.py0 = new Float32Array(M);
     this.mt = new Uint8Array(M);
     this.mdead = new Uint8Array(M);
     this.mid = new Int32Array(M); // stable identity, so a single molecule can be followed
@@ -36,6 +38,7 @@ export class Soup {
     if (this.n >= this.cap) return false;
     const i = this.n++;
     this.mx[i] = x; this.my[i] = y; this.mt[i] = t; this.mdead[i] = 0; this.mid[i] = this.nextMid++;
+    this.px0[i] = x; this.py0[i] = y;
     return true;
   }
 
@@ -168,8 +171,10 @@ export class Soup {
     const w = this.world, rng = w.rng, F = w.fields;
     const mx = this.mx, my = this.my, md = this.mdead, D = CFG.MONO_DIFFUSION * 2;
     const W = CFG.W, H = CFG.H, cur = this._cur;
+    const px0 = this.px0, py0 = this.py0;
     for (let i = 0; i < this.n; i++) {
       if (md[i]) continue;
+      px0[i] = mx[i]; py0[i] = my[i];
       if (rng.next() < CFG.MONOMER_DECAY * (this.scale < 1 ? 4 : 1)) { md[i] = 1; F.add(F.organic, mx[i], my[i], 0.4); continue; }
       w.current(mx[i], my[i], cur);
       let x = mx[i] + (rng.next() - 0.5) * D + cur.x;
@@ -463,7 +468,7 @@ export class Soup {
     let w = 0;
     for (let r = 0; r < this.n; r++) {
       if (md[r]) continue;
-      if (w !== r) { mx[w] = mx[r]; my[w] = my[r]; mt[w] = mt[r]; this.mid[w] = this.mid[r]; }
+      if (w !== r) { mx[w] = mx[r]; my[w] = my[r]; mt[w] = mt[r]; this.mid[w] = this.mid[r]; this.px0[w] = this.px0[r]; this.py0[w] = this.py0[r]; }
       md[w] = 0;
       w++;
     }
