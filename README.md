@@ -84,8 +84,8 @@ Things smaller than a pixel are shown as single specks; they are never enlarged.
 strand, vesicle and cell. Sub-cellular anatomy (organelles, ribosomes, individual membrane lipids) is
 *drawn* procedurally from each cell's simulated state (size, eukaryote or not, plastids, armor,
 motility). It is not simulated molecule by molecule, which would need ~10¹⁶ molecules for even a
-small droplet. The prebiotic soup is also far more dilute than a real ocean, and water molecules are
-not drawn. Two things are not to scale at all: the environment's gradients (sunlit surface to deep
+small droplet. The prebiotic soup is also far more dilute than a real ocean. Water molecules are drawn
+procedurally at molecular zoom (they are not simulated). Two things are not to scale at all: the environment's gradients (sunlit surface to deep
 vents spans hundreds of metres, compressed here into 0.9 mm) and time. Era banners give a rough "on Earth" date for orientation; ticks are not years.
 
 ### Inspecting parts

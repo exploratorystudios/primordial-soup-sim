@@ -42,7 +42,14 @@ export class Soup {
     return true;
   }
 
-  kill(j) { this.mdead[j] = 1; }
+  // Remove monomer j; if it is the molecule being followed, remember what it became.
+  kill(j, by = null, why = '') {
+    this.mdead[j] = 1;
+    if (this.watchMid && this.mid[j] === this.watchMid) this.watchNext = { obj: by, why };
+  }
+
+  // Put a polymer inside a protocell (and remember where it lives).
+  addInside(v, p) { p.home = v; v.polys.push(p); return p; }
 
   findMonomer(x, y, r, type) {
     const mx = this.mx, my = this.my, mt = this.mt, md = this.mdead, r2 = r * r;
@@ -120,18 +127,25 @@ export class Soup {
     const rng = this.world.rng;
     const L = p.seq.length;
     const k = 1 + rng.int(L - 1);
+    let biggest = null;
     for (const piece of [p.seq.slice(0, k), p.seq.slice(k)]) {
+      let q = null;
       if (piece.length === 1) {
         if (into) into.pool[piece[0]]++;
         else this.addMonomer(p.x + rng.range(-2, 2), p.y + rng.range(-2, 2), piece[0]);
       } else if (into) {
-        into.polys.push(this.makePolymer(piece, p.x, p.y));
+        q = this.addInside(into, this.makePolymer(piece, p.x, p.y));
       } else if (this.canAddPolymer()) {
-        this.newPolys.push(this.makePolymer(piece, p.x + rng.range(-2, 2), p.y + rng.range(-2, 2)));
+        q = this.makePolymer(piece, p.x + rng.range(-2, 2), p.y + rng.range(-2, 2));
+        this.newPolys.push(q);
       } else {
         for (const t of piece) this.addMonomer(p.x, p.y, t);
       }
+      if (q && (!biggest || q.seq.length > biggest.seq.length)) biggest = q;
     }
+    p.dead = true;
+    p.next = biggest || into;
+    p.nextWhy = biggest ? 'broke apart; following the larger piece' : into ? 'broke down into nucleotides inside its protocell' : 'broke down into single nucleotides';
   }
 
   // ------------------------------------------------------------------- step
@@ -175,7 +189,7 @@ export class Soup {
     for (let i = 0; i < this.n; i++) {
       if (md[i]) continue;
       px0[i] = mx[i]; py0[i] = my[i];
-      if (rng.next() < CFG.MONOMER_DECAY * (this.scale < 1 ? 4 : 1)) { md[i] = 1; F.add(F.organic, mx[i], my[i], 0.4); continue; }
+      if (rng.next() < CFG.MONOMER_DECAY * (this.scale < 1 ? 4 : 1)) { this.kill(i, null, 'broke down'); F.add(F.organic, mx[i], my[i], 0.4); continue; }
       w.current(mx[i], my[i], cur);
       let x = mx[i] + (rng.next() - 0.5) * D + cur.x;
       let y = my[i] + (rng.next() - 0.5) * D + cur.y + w.plume(x, my[i]);
@@ -204,9 +218,10 @@ export class Soup {
       mx[i] += (sx / c - x) * 0.2;
       my[i] += (sy / c - y) * 0.2;
       if (c + 1 >= CFG.VES_NUCLEATE && this.vesicles.length < CFG.MAX_VESICLES * this.scale) {
-        this.vesicles.push(this.makeVesicle((sx + x) / (c + 1), (sy + y) / (c + 1), c + 1, 0));
-        md[i] = 1;
-        for (const j of nb) md[j] = 1;
+        const nv = this.makeVesicle((sx + x) / (c + 1), (sy + y) / (c + 1), c + 1, 0);
+        this.vesicles.push(nv);
+        this.kill(i, nv, 'helped form a new membrane vesicle');
+        for (const j of nb) this.kill(j, nv, 'helped form a new membrane vesicle');
         this.world.milestone('vesicle', 'Lipids self-assemble into the first membrane vesicle');
       }
     }
@@ -224,8 +239,10 @@ export class Soup {
       md[i] = 1;
       const j = this.findMonomer(x, y, 4, -1);
       if (j < 0) { md[i] = 0; continue; }
-      md[j] = 1;
-      this.newPolys.push(this.makePolymer([mt[i], mt[j]], x, y));
+      const dimer = this.makePolymer([mt[i], mt[j]], x, y);
+      this.kill(i, dimer, 'joined another nucleotide to start a new chain');
+      this.kill(j, dimer, 'joined another nucleotide to start a new chain');
+      this.newPolys.push(dimer);
     }
   }
 
@@ -249,7 +266,7 @@ export class Soup {
       // Chain elongation by condensation.
       if (L < CFG.MAX_POLY_LEN && p.prog === 0 && rng.next() < CFG.POLY_RATE * e) {
         const j = this.findMonomer(p.x, p.y, 5, -1);
-        if (j >= 0) { p.seq.push(this.mt[j]); this.kill(j); this.evalPolymer(p); }
+        if (j >= 0) { p.seq.push(this.mt[j]); this.kill(j, p, 'was added to the end of an RNA strand'); this.evalPolymer(p); }
       }
 
       // Template-directed self-replication.
@@ -259,7 +276,7 @@ export class Soup {
         const j = this.findMonomer(p.x, p.y, 8, mutate ? -1 : need);
         if (j >= 0) {
           p.copy.push(this.mt[j]);
-          this.kill(j);
+          this.kill(j, p, 'was used by a ribozyme to copy itself');
           p.prog++;
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
@@ -321,9 +338,9 @@ export class Soup {
         if (dx * dx + dy * dy > rr2) return;
         if (mt[j] === LIPID) {
           // Vesicles full of RNA swell osmotically and steal membrane from their neighbours.
-          if (rng.next() < 0.25 + 0.12 * np) { v.L++; md[j] = 1; }
+          if (rng.next() < 0.25 + 0.12 * np) { v.L++; this.kill(j, v, 'joined the membrane of a vesicle'); }
         } else if (poolTotal < CFG.VES_POOL && rng.next() < 0.5) {
-          v.pool[mt[j]]++; poolTotal++; md[j] = 1;
+          v.pool[mt[j]]++; poolTotal++; this.kill(j, v, 'diffused into a protocell');
         }
       });
 
@@ -342,7 +359,8 @@ export class Soup {
           const dx = p.x - v.x, dy = p.y - v.y;
           if (dx * dx + dy * dy < r2 && rng.next() < 0.12) {
             p.dead = true;
-            v.polys.push(this.makePolymer(p.seq, v.x, v.y));
+            p.next = this.addInside(v, this.makePolymer(p.seq, v.x, v.y));
+            p.nextWhy = 'was trapped inside a protocell';
           }
         });
       }
@@ -367,7 +385,9 @@ export class Soup {
         let best = null, active = 0;
         for (const p of v.polys) if (p.act > 0) { active++; if (!best || p.act > best.act) best = p; }
         if (best && best.act >= CFG.CELL_ACT && active >= 2) {
-          w.life.spawnFromProtocell(v, best);
+          const cell = w.life.spawnFromProtocell(v, best);
+          v.dead = true; v.next = cell; v.nextWhy = 'became a living cell!';
+          for (const q of v.polys) { q.dead = true; q.next = cell; q.nextWhy = q === best ? 'became the genome of the first cell in its lineage' : 'ended up inside a new living cell'; }
           continue;
         }
       }
@@ -406,7 +426,7 @@ export class Soup {
           p.prog++;
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
-            polys.push(this.makePolymer(seq, v.x, v.y));
+            polys.push(Object.assign(this.makePolymer(seq, v.x, v.y), { home: v }));
             v.copies++;
             this.world.milestone('replicator', 'A ribozyme copies itself: the RNA world begins');
           }
@@ -427,7 +447,7 @@ export class Soup {
       if (a >= 0) {
         v.pool[a]--;
         const b = this.pickPool(v);
-        if (b >= 0) { v.pool[b]--; v.polys.push(this.makePolymer([a, b], v.x, v.y)); }
+        if (b >= 0) { v.pool[b]--; this.addInside(v, this.makePolymer([a, b], v.x, v.y)); }
         else v.pool[a]++;
       }
     }
@@ -439,7 +459,11 @@ export class Soup {
     const La = v.L >> 1;
     const a = this.makeVesicle(v.x + Math.cos(ang) * off, v.y + Math.sin(ang) * off, La, v.gen + 1);
     const b = this.makeVesicle(v.x - Math.cos(ang) * off, v.y - Math.sin(ang) * off, v.L - La, v.gen + 1);
-    for (const p of v.polys) (rng.next() < 0.5 ? a : b).polys.push(p);
+    for (const p of v.polys) this.addInside(rng.next() < 0.5 ? a : b, p);
+    // Follow the daughter that inherited more of the contents.
+    v.dead = true;
+    v.next = a.polys.length >= b.polys.length ? a : b;
+    v.nextWhy = 'divided in two; following the daughter with more RNA';
     for (let t = 0; t < 4; t++) { a.pool[t] = v.pool[t] >> 1; b.pool[t] = v.pool[t] - a.pool[t]; }
     a.copies = b.copies = v.copies; // replication history of the lineage
     if (a.polys.some((p) => p.act > 0) || b.polys.some((p) => p.act > 0)) {
@@ -451,6 +475,7 @@ export class Soup {
   burst(v) {
     const rng = this.world.rng, F = this.world.fields;
     v.dead = true;
+    v.nextWhy = 'burst, spilling its contents into the water';
     const lip = Math.min(v.L, 24);
     for (let k = 0; k < lip; k++) {
       const a = rng.next() * 6.283;
@@ -459,7 +484,8 @@ export class Soup {
     F.add(F.organic, v.x, v.y, (v.L - lip) * 0.2);
     for (let t = 0; t < 4; t++) for (let k = 0; k < v.pool[t]; k++) this.addMonomer(v.x + rng.range(-v.r, v.r), v.y + rng.range(-v.r, v.r), t);
     for (const p of v.polys) {
-      if (this.canAddPolymer()) { p.x = v.x + rng.range(-v.r, v.r); p.y = v.y + rng.range(-v.r, v.r); p.dead = false; this.newPolys.push(p); }
+      if (this.canAddPolymer()) { p.x = v.x + rng.range(-v.r, v.r); p.y = v.y + rng.range(-v.r, v.r); p.dead = false; p.home = null; this.newPolys.push(p); }
+      else { p.dead = true; p.nextWhy = 'was lost when its protocell burst'; }
     }
   }
 

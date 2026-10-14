@@ -126,6 +126,7 @@ export class Life {
 
   spawnFromProtocell(v, poly) {
     const c = this.makeCell(v.x, v.y, Gn.fromSequence(poly.seq), null);
+    c.fromProtocell = true;
     c.energy = c.cap * 0.5;
     c.nut = c.nutNeed * 0.5;
     c.origin = ++this.origins;
@@ -135,6 +136,7 @@ export class Life {
     this.newborns.push(c);
     this.w.milestone('cell', 'A protocell becomes a self-sustaining living cell (abiogenesis)');
     this.w.log(`Abiogenesis event #${c.origin}: a new lineage of life is born`);
+    return c;
   }
 
   newSpecies(c, parentId) {
@@ -358,6 +360,7 @@ export class Life {
   kill(c, cause, eaten) {
     if (c.dead) return;
     c.dead = true;
+    if (!c.nextWhy) c.nextWhy = { starved: 'starved', aged: 'died of old age', oxygen: 'was poisoned by oxygen', virus: 'burst, killed by viruses', crowding: 'died in a crowded patch', impact: 'was killed by the asteroid impact' }[cause] || 'died';
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
     if (!eaten) {
       const F = this.w.fields;
@@ -435,17 +438,21 @@ export class Life {
     // Only cells that already store their genome as DNA (and make proteins) can host one.
     if (!a.mito && a.dna && a.transl > 0.5 && b.aer > 0.5 && o2f > 0.15 && rng.next() < CFG.ENDO_P) {
       a.mito = true;
+      b.endosymbiont = true;
       decode(a);
       a.species = this.newSpecies(a, a.species).id;
       this.species.get(a.species).euk = true;
       this.w.milestone('eukaryote', 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote');
     } else if (a.mito && !a.plastid && b.effP > 0.25 && rng.next() < CFG.ENDO_P) {
       a.plastid = true;
+      b.endosymbiont = true;
       decode(a);
       a.species = this.newSpecies(a, a.species).id;
       this.species.get(a.species).euk = true;
       this.w.milestone('plastid', 'A eukaryote keeps a photosynthetic cell as a chloroplast: the first alga');
     }
+    b.next = a;
+    b.nextWhy = b.endosymbiont ? `was swallowed by cell #${a.id} and lives on inside it as an organelle` : `was swallowed by cell #${a.id}`;
     this.kill(b, 'eaten', true);
     return true;
   }

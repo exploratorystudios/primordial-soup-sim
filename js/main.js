@@ -3,7 +3,8 @@ import { World } from './world.js';
 import { CFG } from './config.js';
 import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
-import { fovFor, topLevelAt, childAt, contains, ancestors } from './parts.js';
+import { fovFor, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel } from './parts.js';
+import { Cell } from './life.js';
 import { Tour } from './tour.js';
 import { saveToFile, loadFromFile } from './persist.js';
 
@@ -162,10 +163,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); $('btn-play').click(); }
   else if (e.key === 'Escape') {
     $('tree-modal').hidden = true;
-    // Go up one level; from the outermost level, deselect.
-    const s = ui.selected;
-    const up = s ? ancestors(s, world).at(-1) : null;
-    ui.select(world, up || null);
+    goUp();
   }
   else if (e.key === 'f' || e.key === 'F') toggleFollow();
   else if (e.key === '+' || e.key === '=') setSpeed(Math.min(SPEEDS.length - 1, speedIdx + 1));
@@ -211,16 +209,57 @@ canvas.addEventListener('pointerup', (e) => {
   drag = null;
 });
 
-// Keep the selection's position current; molecules and polymers can vanish into other structures.
+// Keep the selection current. When the selected thing turns into something else (a molecule built
+// into a strand, a protocell dividing or becoming a cell, a cell swallowed, a virus infecting),
+// hand the selection (and the follow) over to whatever it became.
 function trackSelection(sel) {
   const soup = world.soup;
+  soup.watchMid = 0;
+  let root = sel;
+  while (root.parent) root = root.parent;
   for (let q = sel; q; q = q.parent) {
     if (!q.st) continue; // a free molecule from the soup: find it again by its stable id
+    soup.watchMid = q.st.mid;
     const i = soup.indexOfMid(q.st.mid);
-    if (i < 0) q.st.gone = true;
-    else { q.st.x = soup.mx[i]; q.st.y = soup.my[i]; }
+    if (i < 0) {
+      if (!q.st.gone) { q.st.gone = true; q.st.next = soup.watchNext; }
+    } else {
+      q.st.x = soup.mx[i]; q.st.y = soup.my[i];
+      q.st.ang = (q.st.mid * 2.399 + (opts.time ?? world.t) * 0.04) % (Math.PI * 2); // molecules tumble
+    }
   }
-  sel.gone = !!sel.obj.dead;
+  soup.watchNext = null;
+  if (!sel.obj.dead) { sel.gone = false; return; }
+  // Find the innermost thing in the chain that turned into something we can follow.
+  for (let q = sel; q; q = q.parent) {
+    const o = q.st || q.obj;
+    if (!(o.dead || o.gone)) continue;
+    const nxt = q.st ? q.st.next : { obj: o.next, why: o.nextWhy };
+    if (nxt && nxt.obj && !nxt.obj.dead) { handOff(sel, q, nxt.obj, nxt.why); return; }
+    if (!sel.gone) ui.toast(`${crumbLabel(q)} ${(nxt && nxt.why) || o.nextWhy || 'is gone'}`, world.t);
+    break;
+  }
+  sel.gone = true;
+}
+
+function kindOf(o) {
+  if (o instanceof Cell) return 'cell';
+  if (o.polys) return 'vesicle';
+  if (o.seq) return 'polymer';
+  if (o.k1 !== undefined) { o.r = o.r || 0.2; return 'virus'; }
+  return null;
+}
+
+function handOff(old, from, obj, why) {
+  const kind = kindOf(obj);
+  if (!kind) { old.gone = true; return; }
+  const s = mkSel(kind, obj, kind === 'virus' ? { world } : {});
+  if (kind === 'polymer') s.obj._rad = polymerRadius(obj);
+  if (kind === 'polymer' && obj.home) s.parent = mkSel('vesicle', obj.home);
+  s.follow = old.follow;
+  s.offset = { x: 0, y: 0 };
+  ui.toast(`${crumbLabel(from)} ${why || 'changed'}`, world.t);
+  ui.select(world, s);
 }
 
 // Select a part from the inspector and fly the camera to it at a fitting magnification.
@@ -261,6 +300,15 @@ function toggleFollow() {
   ui.lastHTML = null;
 }
 ui.onFollow = toggleFollow;
+
+// Up one level (inspector button or Esc); keeps following and keeps the view steady.
+function goUp() {
+  const s = ui.selected;
+  const up = s ? ancestors(s, world).at(-1) : null;
+  if (up && s.follow) { up.follow = true; up.offset = { x: renderer.cam.x - up.obj.x, y: renderer.cam.y - up.obj.y }; }
+  ui.select(world, up || null);
+}
+ui.onUp = goUp;
 
 function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT; }
 

@@ -38,6 +38,7 @@ export class UI {
     // pointerdown (not click) so a re-render between press and release can't swallow it.
     $('inspector').addEventListener('pointerdown', (e) => {
       if (e.target.closest('[data-follow]')) { e.preventDefault(); if (this.onFollow) this.onFollow(); return; }
+      if (e.target.closest('[data-up]')) { e.preventDefault(); if (this.onUp) this.onUp(); return; }
       const k = e.target.closest('[data-kid]'), c = e.target.closest('[data-crumb]');
       const target = k ? this.kids[+k.dataset.kid] : c ? this.crumbs[+c.dataset.crumb] : null;
       if (target && this.onPick) { e.preventDefault(); this.onPick(target); }
@@ -188,7 +189,8 @@ export class UI {
     const kids = this.kids.length
       ? `<h3>Parts <span class="muted">(${this.kids.length})</span></h3><ul class="parts">${this.kids.map((k, i) => `<li data-kid="${i}"><span>${esc(crumbLabel(k))}</span><span class="muted">${esc(k.note || '')}</span></li>`).join('')}</ul>`
       : '';
-    const follow = sel.gone ? '' : `<button class="follow ${sel.follow ? 'on' : ''}" data-follow title="F">${sel.follow ? 'Following' : 'Follow'}</button>`;
+    const follow = (sel.gone ? '' : `<button class="follow ${sel.follow ? 'on' : ''}" data-follow title="F">${sel.follow ? 'Following' : 'Follow'}</button>`)
+      + (this.crumbs.length ? `<button class="follow" data-up title="Esc: select the thing this is part of">↑ Up</button>` : '');
     const html = `<div class="crumbs">${crumbs}${follow}</div>${body}${kids}`;
     // Only touch the DOM when something changed, so clicks are never lost mid-update.
     if (html !== this.lastHTML) { el.innerHTML = html; this.lastHTML = html; }

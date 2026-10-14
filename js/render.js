@@ -88,6 +88,9 @@ export class Renderer {
     this.off = document.createElement('canvas');
     this.overlayKey = null;
     this.frame = 0;
+    // If the browser ever drops the canvas (GPU reset, memory pressure), wait for it to come back.
+    canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.lost = true; });
+    canvas.addEventListener('contextrestored', () => { this.lost = false; this.overlayKey = null; });
     this.resize();
   }
 
@@ -155,6 +158,7 @@ export class Renderer {
 
   // ------------------------------------------------------------------- frame
   draw(world, opts) {
+    if (this.lost) return;
     const ctx = this.ctx, cv = this.canvas, cw = cv.width, ch = cv.height;
     const ppu = this.ppu, cx = this.cam.x, cy = this.cam.y;
     this.frame++;
@@ -193,6 +197,7 @@ export class Renderer {
     }
 
     this.drawVents(world);
+    this.drawWater();
     if (opts.showChem) this.drawChemistry(world);
     this.drawLife(world, opts);
     this.drawViruses(world);
@@ -206,6 +211,84 @@ export class Renderer {
     this.drawScaleBar();
   }
 
+  // At molecular zoom the ocean is visibly made of water molecules (~0.3 nm apart), jiggling
+  // with thermal motion. They are drawn procedurally, anchored to the world, so when you follow
+  // something you can see the water stream past it. Frozen when paused.
+  drawWater() {
+    const pxnm = this.pxnm;
+    if (pxnm < 18) return;
+    const ctx = this.ctx, v = this.v, cx = this.cam.x, cy = this.cam.y;
+    const g = 0.31 * NM;
+    const i0 = Math.floor(v.x0 / g), i1 = Math.ceil(v.x1 / g), j0 = Math.floor(v.y0 / g), j1 = Math.ceil(v.y1 / g);
+    if ((i1 - i0) * (j1 - j0) > 9000) return;
+    const t = this.time;
+    ctx.globalAlpha = Math.min(0.11, (pxnm - 18) / 120 + 0.04); // a quiet backdrop, not the subject
+    const oR = 0.15 * NM, hR = 0.08 * NM, bond = 0.1 * NM;
+    ctx.fillStyle = '#ff7a7a';
+    const pos = [];
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        let h = Math.imul(i, 0x27d4eb2d) ^ Math.imul(j, 0x165667b1);
+        h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13;
+        const r1 = (h & 1023) / 1023, r2 = ((h >>> 10) & 1023) / 1023, r3 = ((h >>> 20) & 1023) / 1023;
+        const x = (i + 0.5 + (r1 - 0.5) * 0.7) * g + Math.sin(t * 0.9 + r2 * 40) * g * 0.15 - cx;
+        const y = (j + 0.5 + (r2 - 0.5) * 0.7) * g + Math.cos(t * 0.8 + r1 * 40) * g * 0.15 - cy;
+        pos.push(x, y, r3 * TAU + t * 0.3);
+      }
+    }
+    ctx.beginPath();
+    for (let k = 0; k < pos.length; k += 3) { ctx.moveTo(pos[k] + oR, pos[k + 1]); ctx.arc(pos[k], pos[k + 1], oR, 0, TAU); }
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    for (let k = 0; k < pos.length; k += 3) {
+      for (const da of [-0.91, 0.91]) { // H–O–H angle ≈ 104.5°
+        const a = pos[k + 2] + da, x = pos[k] + Math.cos(a) * bond, y = pos[k + 1] + Math.sin(a) * bond;
+        ctx.moveTo(x + hR, y); ctx.arc(x, y, hR, 0, TAU);
+      }
+    }
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Circles can be millions of pixels across at molecular zoom, which GPUs handle badly (and can
+  // lose the canvas over). Big ones are drawn as just their visible part. X, Y are camera-relative.
+  bigDisk(X, Y, r) {
+    const ctx = this.ctx, v = this.v;
+    ctx.beginPath();
+    if (r * this.ppu < 20000) { ctx.arc(X, Y, r, 0, TAU); return true; }
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    if (d - half >= r) return false;                       // entirely off screen
+    if (d + half <= r) {                                    // the screen is inside the disk
+      ctx.rect(v.x0 - this.cam.x, v.y0 - this.cam.y, v.x1 - v.x0, v.y1 - v.y0);
+      return true;
+    }
+    // The edge crosses the screen: a band along the visible stretch of the rim.
+    const { mid, phi } = this.visibleArc(X, Y, r, d, half), rin = Math.max(0, r - 3 * half);
+    for (let k = 0; k <= 64; k++) { const a = mid - phi + (2 * phi * k) / 64; ctx.lineTo(X + Math.cos(a) * r, Y + Math.sin(a) * r); }
+    for (let k = 64; k >= 0; k--) { const a = mid - phi + (2 * phi * k) / 64; ctx.lineTo(X + Math.cos(a) * rin, Y + Math.sin(a) * rin); }
+    ctx.closePath();
+    return true;
+  }
+
+  bigRing(X, Y, r) {
+    const ctx = this.ctx, v = this.v;
+    ctx.beginPath();
+    if (r * this.ppu < 20000) { ctx.arc(X, Y, r, 0, TAU); return true; }
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    if (d - half >= r || d + half <= r) return false;       // rim not on screen
+    const { mid, phi } = this.visibleArc(X, Y, r, d, half);
+    for (let k = 0; k <= 64; k++) { const a = mid - phi + (2 * phi * k) / 64; ctx.lineTo(X + Math.cos(a) * r, Y + Math.sin(a) * r); }
+    return true;
+  }
+
+  visibleArc(X, Y, r, d, half) {
+    const mid = Math.atan2(-Y, -X); // from the circle's centre toward the screen centre
+    const c = (r * r + d * d - half * half) / (2 * r * Math.max(d, 1e-12));
+    const phi = c <= -1 ? Math.PI : Math.min(Math.PI, Math.acos(Math.min(1, c)) * 1.1 + 1e-4);
+    return { mid, phi };
+  }
+
   inView(x, y, m) {
     const v = this.v;
     return x + m >= v.x0 && x - m <= v.x1 && y + m >= v.y0 && y - m <= v.y1;
@@ -217,6 +300,12 @@ export class Renderer {
       const r = 70 * v.strength * (world.ventMul > 1 ? 1.6 : 1);
       if (!this.inView(v.x, CFG.H, r)) continue;
       const X = v.x - cx, Y = CFG.H - cy;
+      if (r * this.ppu > 20000) {
+        // Zoomed far in: the glow is effectively uniform across the screen.
+        const d = Math.hypot(X, Y);
+        if (d < r) { ctx.fillStyle = `rgba(255,140,50,${(0.55 * (1 - d / r)).toFixed(3)})`; ctx.fillRect(this.v.x0 - cx, this.v.y0 - cy, this.v.x1 - this.v.x0, this.v.y1 - this.v.y0); }
+        continue;
+      }
       const g = ctx.createRadialGradient(X, Y, 0, X, Y, r);
       g.addColorStop(0, 'rgba(255,150,60,0.55)');
       g.addColorStop(1, 'rgba(255,90,20,0)');
@@ -250,7 +339,7 @@ export class Renderer {
     } else {
       for (let i = 0; i < soup.n; i++) {
         if (!this.inView(mx[i], my[i], m)) continue;
-        this.drawMonomer(mx[i], my[i], mt[i], (soup.mid[i] * 2.399) % TAU);
+        this.drawMonomer(mx[i], my[i], mt[i], (soup.mid[i] * 2.399 + this.time * 0.04) % TAU); // tumbling
       }
     }
 
@@ -448,7 +537,7 @@ export class Renderer {
       return;
     }
     ctx.fillStyle = alive ? 'rgba(255,120,230,0.12)' : 'rgba(255,240,190,0.06)';
-    ctx.beginPath(); ctx.arc(X, Y, ve.r, 0, TAU); ctx.fill();
+    if (this.bigDisk(X, Y, ve.r)) ctx.fill();
     this.drawBilayer(ve.x, ve.y, ve.r, alive ? 'rgba(255,190,245,0.95)' : 'rgba(245,232,180,0.95)', alive ? 'rgba(255,170,240,0.35)' : 'rgba(235,215,160,0.35)');
     if (rp < 6) return;
     // Contents, at true size inside the membrane.
@@ -474,7 +563,7 @@ export class Renderer {
           const r = new RNG((ve.id * 7919 + t * 131 + k * 17) >>> 0);
           const a = r.next() * TAU, rr = Math.sqrt(r.next()) * 0.85;
           const px = ve.x + Math.cos(a) * rr * inner, py = ve.y + Math.sin(a) * rr * inner;
-          if (this.inView(px, py, 3 * NM)) this.drawMonomer(px, py, t, r.next() * TAU);
+          if (this.inView(px, py, 3 * NM)) this.drawMonomer(px, py, t, r.next() * TAU + this.time * 0.03);
         }
       }
     }
@@ -488,7 +577,7 @@ export class Renderer {
     if (DIM.lipidSpacing * this.pxnm < 2.5) {
       ctx.strokeStyle = head;
       ctx.lineWidth = Math.max(t, 1.1 * this.px);
-      ctx.beginPath(); ctx.arc(X, Y, Math.max(0, R - t / 2), 0, TAU); ctx.stroke();
+      if (this.bigRing(X, Y, Math.max(0, R - t / 2))) ctx.stroke();
       return;
     }
     const vcx = (v.x0 + v.x1) / 2, vcy = (v.y0 + v.y1) / 2, h = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2;
@@ -571,14 +660,14 @@ export class Renderer {
       if (dim) {
         ctx.globalAlpha = 0.16;
         ctx.fillStyle = col;
-        ctx.beginPath(); ctx.arc(X, Y, c.r, 0, TAU); ctx.fill();
+        if (this.bigDisk(X, Y, c.r)) ctx.fill();
         ctx.globalAlpha = 1;
         continue;
       }
       const fill = 0.35 + 0.65 * Math.max(0.15, Math.min(1, c.energy / c.cap));
       ctx.globalAlpha = rp > 14 ? Math.max(0.85, fill) : fill; // close up, cytoplasm is opaque
       ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(X, Y, c.r, 0, TAU); ctx.fill();
+      if (this.bigDisk(X, Y, c.r)) ctx.fill();
       ctx.globalAlpha = 1;
       if (rp > 14 && detailed < 120) { detailed++; this.drawCellInterior(c); }
       else if (c.mito && rp > 3) {
@@ -591,13 +680,13 @@ export class Renderer {
         const wall = (20 + armor * 80) * NM;
         ctx.strokeStyle = 'rgba(205,165,105,0.85)';
         ctx.lineWidth = Math.max(wall, px);
-        ctx.beginPath(); ctx.arc(X, Y, c.r + wall / 2, 0, TAU); ctx.stroke();
+        if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
       }
       if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true);
       else if (rp > 3 || c.mito) {
         ctx.strokeStyle = c.mito ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)';
         ctx.lineWidth = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8));
-        ctx.beginPath(); ctx.arc(X, Y, c.r, 0, TAU); ctx.stroke();
+        if (this.bigRing(X, Y, c.r)) ctx.stroke();
       }
     }
     this.drawBonds(cells);
@@ -691,7 +780,7 @@ export class Renderer {
       if (a.thyl) {
         ctx.strokeStyle = 'rgba(60,200,90,0.65)';
         ctx.lineWidth = line(10);
-        for (const f of [0.8, 0.72, 0.64]) { ctx.beginPath(); ctx.arc(X, Y, r * f, 0, TAU); ctx.stroke(); }
+        for (const f of [0.8, 0.72, 0.64]) if (this.bigRing(X, Y, r * f)) ctx.stroke();
       }
       this.drawGenome(c, a.dna, c.x, c.y, r, c.dna ? 'dna' : 'rna');
       this.drawInfection(c);
@@ -704,15 +793,15 @@ export class Renderer {
     // Nucleus with double envelope, pores, chromatin and nucleolus.
     const nr = 0.34 * r;
     ctx.fillStyle = 'rgba(40,25,70,0.85)';
-    ctx.beginPath(); ctx.arc(X, Y, nr, 0, TAU); ctx.fill();
+    if (this.bigDisk(X, Y, nr)) ctx.fill();
     this.drawGenome(c, a.chrom, c.x, c.y, nr, 'chromatin');
     ctx.fillStyle = 'rgba(100,70,150,0.95)';
     ctx.beginPath(); ctx.arc(X + a.nuc.fx * nr, Y + a.nuc.fy * nr, nr * 0.3, 0, TAU); ctx.fill();
     const gap = DIM.nuclearGap * NM;
     ctx.strokeStyle = 'rgba(220,200,255,0.85)';
     ctx.lineWidth = line(8);
-    ctx.beginPath(); ctx.arc(X, Y, nr, 0, TAU); ctx.stroke();
-    ctx.beginPath(); ctx.arc(X, Y, nr + gap, 0, TAU); ctx.stroke();
+    if (this.bigRing(X, Y, nr)) ctx.stroke();
+    if (this.bigRing(X, Y, nr + gap)) ctx.stroke();
     const pore = (DIM.nuclearPore * NM) / 2;
     if (pore * 2 * ppu >= 2) {
       ctx.fillStyle = 'rgba(255,240,200,0.9)';

@@ -39,7 +39,7 @@ export class Viruses {
     for (const v of this.list) {
       v.age++;
       // Ultraviolet light near the surface destroys exposed particles.
-      if (rng.next() < CFG.VIRUS_DECAY * (1 + w.sunAt(v.y) * 3)) { v.dead = true; continue; }
+      if (rng.next() < CFG.VIRUS_DECAY * (1 + w.sunAt(v.y) * 3)) { v.dead = true; v.nextWhy = 'fell apart (UV light and decay)'; continue; }
       w.current(v.x, v.y, CUR);
       v.x += (rng.next() - 0.5) * CFG.VIRUS_D + CUR.x * 0.8;
       v.y += (rng.next() - 0.5) * CFG.VIRUS_D + CUR.y * 0.8;
@@ -58,13 +58,16 @@ export class Viruses {
           const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);
           if (rng.next() > CFG.VIRUS_INFECT * fit * (1 - 0.9 * c.resist)) return false;
           used = true;
+          v.next = c;
           if (v.cargo && rng.next() < CFG.TRANSDUCE) {
+            v.nextWhy = `slipped a gene into cell #${c.id}`;
             // Transduction: the virus delivers a gene from its last host instead of taking over.
             c.g = new Float32Array(c.g);
             c.g[v.cargo.i] = v.cargo.v;
             this.stats.transductions++;
             w.life.redecode(c);
           } else {
+            v.nextWhy = `injected its genome into cell #${c.id}`;
             c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
             this.stats.infections++;
           }
@@ -97,5 +100,6 @@ export class Viruses {
       this.pending.push(this.make(c.x + Math.cos(a) * r, c.y + Math.sin(a) * r, clamp(inf.k1 + rng.gauss() * CFG.VIRUS_MUT), clamp(inf.k2 + rng.gauss() * CFG.VIRUS_MUT), inf.lineage, cargo));
     }
     this.stats.bursts++;
+    if (n > 0) { c.next = this.pending.at(-1); c.nextWhy = `burst open, releasing ${n} new viruses; following one`; }
   }
 }
