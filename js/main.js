@@ -3,7 +3,7 @@ import { World } from './world.js';
 import { CFG } from './config.js';
 import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
-import { fovFor, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel } from './parts.js';
+import { fovFor, centreOf, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel } from './parts.js';
 import { Cell } from './life.js';
 import { Tour } from './tour.js';
 import { saveToFile, loadFromFile } from './persist.js';
@@ -85,7 +85,8 @@ function frameStep() {
   // A strand inside a protocell: place it for this frame before aiming the camera at it.
   for (let q = sel; q; q = q.parent) if (q.kind === 'polymer' && q.obj.home && !q.obj.home.dead) renderer.placeInternal(q.obj, q.obj.home);
   opts.selected = sel && !sel.gone ? sel.obj : null;
-  if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
+  if (flight) fly(dt);
+  else if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }
   renderer.draw(world, opts);
   ui.update(world, frame);
@@ -140,6 +141,7 @@ for (const b of document.querySelectorAll('[data-fov]')) {
   b.onclick = () => {
     const fov = +b.dataset.fov;
     if (!fov) { $('btn-fit').click(); return; }
+    flight = null;
     renderer.setFieldWidthNm(fov);
     const sel = ui.selected;
     if (sel && !sel.gone) { const t = followTarget(sel); sel.follow = true; sel.offset = { x: sel.obj.x - t.x, y: sel.obj.y - t.y }; renderer.cam.x = sel.obj.x; renderer.cam.y = sel.obj.y; }
@@ -177,6 +179,7 @@ let drag = null;
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   tour.stop();
+  flight = null;
   const r = canvas.getBoundingClientRect();
   const f = Math.exp(-e.deltaY * 0.0015);
   // While following something, zoom straight into it.
@@ -194,6 +197,7 @@ canvas.addEventListener('pointermove', (e) => {
   drag.moved += Math.abs(dx) + Math.abs(dy);
   if (drag.moved > 4) {
     tour.stop();
+    flight = null;
     canvas.classList.add('dragging');
     renderer.pan(dx, dy);
     if (ui.selected) ui.selected.follow = false;
@@ -301,15 +305,41 @@ function handOff(old, from, obj, why) {
   ui.select(world, s);
 }
 
-// Select a part from the inspector and fly the camera to it at a fitting magnification.
+// Select a part from the inspector and fly the camera to it, framed to fit.
+let flight = null;
 function focus(s) {
   if (s.kind === 'polymer') s.obj._rad = polymerRadius(s.obj);
   ui.select(world, s);
-  s.follow = true;
-  const ft = followTarget(s);
-  s.offset = { x: s.obj.x - ft.x, y: s.obj.y - ft.y }; // centre on the part itself
-  renderer.setFieldWidthNm(fovFor(s));
-  if (!s.obj.dead) { renderer.cam.x = s.obj.x; renderer.cam.y = s.obj.y; }
+  if (s.obj.dead) return;
+  s.follow = false; // follow starts once we arrive
+  flight = { sel: s, t: 0, dur: 0.9, from: { x: renderer.cam.x, y: renderer.cam.y, fov: renderer.fieldWidthNm() } };
+}
+
+// Log-zoom flight that keeps the destination steady on screen; far jumps pull back first.
+function fly(dt) {
+  const f = flight, s = f.sel;
+  if (s.gone || s.obj.dead || ui.selected !== s) { flight = null; return; }
+  f.t += dt;
+  const c = centreOf(s), to = { x: c.x, y: c.y, fov: fovFor(s) }, from = f.from;
+  const u = Math.min(1, f.t / f.dur), e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+  const lerpFov = (a, b, k) => Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * k);
+  const gapNm = Math.hypot(to.x - from.x, to.y - from.y) * NM_PER_UNIT;
+  const leg = (a, b, k) => {
+    const fov = lerpFov(a.fov, b.fov, k), shrink = b.fov < a.fov;
+    const w = shrink ? (fov - b.fov) / (a.fov - b.fov || 1) : 1 - (fov - a.fov) / (b.fov - a.fov || 1);
+    renderer.cam.x = b.x + (a.x - b.x) * w; renderer.cam.y = b.y + (a.y - b.y) * w;
+    renderer.setFieldWidthNm(fov);
+  };
+  if (gapNm > 3 * Math.max(from.fov, to.fov)) {
+    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, fov: gapNm * 1.4 };
+    if (e < 0.5) leg(from, mid, e * 2); else leg(mid, to, e * 2 - 1);
+  } else leg(from, to, e);
+  if (u >= 1) {
+    flight = null;
+    s.follow = true;
+    const ft = followTarget(s);
+    s.offset = { x: c.x - ft.x, y: c.y - ft.y }; // keep the part itself in the middle
+  }
 }
 ui.onPick = focus;
 ui.renderer = renderer;

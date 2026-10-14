@@ -6,6 +6,7 @@
 import { CFG } from './config.js';
 import { LIPID, BASES } from './chemistry.js';
 import { RNG } from './rng.js';
+import { buildAnatomy, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
 
 export const NM_PER_UNIT = 500;
 const NM = 1 / NM_PER_UNIT; // world units per nanometre
@@ -44,19 +45,6 @@ export function dnaBase(seed, seg, k) {
   return (h >>> 0) & 3;
 }
 
-// A smooth random walk confined to a disc: how a long polymer crumples inside a small space.
-function tangle(rng, n, step, rad) {
-  const out = [];
-  let x = 0, y = 0, th = rng.next() * TAU;
-  for (let k = 0; k < n; k++) {
-    th += (rng.next() - 0.5) * 1.2;
-    x += Math.cos(th) * step; y += Math.sin(th) * step;
-    const d = Math.hypot(x, y);
-    if (d > rad) { x *= rad / d; y *= rad / d; th += Math.PI * 0.8; }
-    out.push(x, y);
-  }
-  return out;
-}
 
 export function formatLen(nm) {
   const p = (v) => String(+v.toPrecision(3));
@@ -598,7 +586,7 @@ export class Renderer {
 
   // A lipid bilayer of radius R; individual lipids are drawn once they are resolvable,
   // and only along the arc that is on screen.
-  drawBilayer(x, y, R, head, tail, twoTails = false) {
+  drawBilayer(x, y, R, head, tail, twoTails = false, cell = null) {
     const ctx = this.ctx, v = this.v, t = DIM.bilayer * NM;
     const X = x - this.cam.x, Y = y - this.cam.y;
     if (DIM.lipidSpacing * this.pxnm < 2.5) {
@@ -634,6 +622,21 @@ export class Renderer {
       ctx.moveTo(ix + hr, iy); ctx.arc(ix, iy, hr, 0, TAU);
     }
     ctx.fill();
+    if (cell) {
+      // Proteins set into the membrane (channels, pumps, transporters, receptors, ATP synthase).
+      const sp = membraneProteinSpacing(R), k0 = Math.floor((mid - phi) / sp), k1 = Math.ceil((mid + phi) / sp);
+      for (let k = k0; k <= k1; k++) {
+        const pr = membraneProteinAt(cell, ((k % 100000) + 100000) % 100000);
+        if (!pr) continue;
+        const th = k * sp, w = pr.size * NM, hgt = t + 3 * NM, rc = R - t / 2;
+        ctx.save();
+        ctx.translate(X + Math.cos(th) * rc, Y + Math.sin(th) * rc);
+        ctx.rotate(th);
+        ctx.fillStyle = pr.name === 'ATP synthase' ? 'rgba(255,220,110,0.95)' : pr.name === 'Receptor' ? 'rgba(255,140,200,0.95)' : 'rgba(140,200,255,0.95)';
+        ctx.beginPath(); ctx.ellipse(0, 0, hgt / 2, w / 2, 0, 0, TAU); ctx.fill();
+        ctx.restore();
+      }
+    }
     if (this.pxnm >= 7) {
       ctx.strokeStyle = 'rgba(210,190,130,0.8)';
       ctx.lineWidth = 0.13 * NM;
@@ -666,9 +669,10 @@ export class Renderer {
     const focus = opts.focusOrg || 0;
     // Flagella first, so they trail behind every cell rather than across neighbours.
     for (const c of cells) {
-      if (c.motil > 0.3 && c.r * ppu > 2 && this.inView(c.x, c.y, c.r * 6)) {
+      if (c.r * ppu > 2 && this.inView(c.x, c.y, c.r * 6)) {
         ctx.globalAlpha = focus && c.org !== focus ? 0.15 : 1;
-        this.drawFlagellum(c, world.t);
+        if (c.motil > 0.3) this.drawFlagellum(c, this.time);
+        if (!c.mito && c.r * ppu > 14) this.drawPili(c);
       }
     }
     ctx.globalAlpha = 1;
@@ -709,7 +713,7 @@ export class Renderer {
         ctx.lineWidth = Math.max(wall, px);
         if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
       }
-      if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true);
+      if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
       else if (rp > 3 || c.mito) {
         ctx.strokeStyle = c.mito ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)';
         ctx.lineWidth = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8));
@@ -720,103 +724,117 @@ export class Renderer {
   }
 
   drawFlagellum(c, t) {
-    const ctx = this.ctx, X = c.x - this.cam.x, Y = c.y - this.cam.y;
-    const sp = Math.hypot(c.vx, c.vy);
-    let ux = -Math.cos(c.heading), uy = -Math.sin(c.heading);
-    if (sp > 0.02) { ux = -c.vx / sp; uy = -c.vy / sp; }
-    // Bacterial flagella are ~20 nm thick and several µm long, beating as a helix.
-    const len = Math.min(20, c.r * 5), amp = 0.5, lambda = 5, ph = t * 0.8 + c.id;
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    // Bacterial flagella are ~20 nm thick and several µm long, beating as a helix; eukaryotic ones ~250 nm.
     ctx.strokeStyle = 'rgba(220,235,255,0.4)';
     ctx.lineWidth = Math.max((c.mito ? 250 : DIM.flagellum) * NM, 0.8 * this.px);
     ctx.beginPath();
-    for (let k = 0; k <= 40; k++) {
-      const s = (k / 40) * len, w = amp * Math.sin((s / lambda) * TAU - ph) * Math.min(1, s / 1.5);
-      const x = X + ux * (c.r + s) - uy * w, y = Y + uy * (c.r + s) + ux * w;
-      if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-    }
+    flagellumPath(c, t).forEach((q, k) => (k ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy)));
     ctx.stroke();
   }
 
-  // Procedural anatomy, generated deterministically from the cell's id and state.
-  anatomy(c) {
-    const key = (c.mito ? 1 : 0) | (c.plastid ? 2 : 0) | (c.effP > 0.25 ? 4 : 0) | (c.dna ? 8 : 0) | (Math.round(c.transl * 4) << 4);
-    const old = c._anat;
-    if (old && old.key === key && old.r === c.r) return old;
-    const rng = new RNG((Math.imul(c.id, 2654435761) ^ 0x9e3779b9) >>> 0);
-    const a = { key, r: c.r, ribo: [], dna: [], chrom: [], mitos: [], plast: [], er: [], nuc: null, thyl: !c.mito && c.effP > 0.25 };
-    const rUm = c.r * 0.5, areaUm2 = Math.PI * rUm * rUm;
-    const hole = c.mito ? 0.4 : 0;
-    const nr = Math.min(700, Math.round(areaUm2 * 45 * (0.3 + 0.7 * c.transl)));
-    for (let k = 0, tries = 0; k < nr && tries < nr * 5; tries++) {
-      const x = rng.next() * 2 - 1, y = rng.next() * 2 - 1, d2 = x * x + y * y;
-      if (d2 > 0.86 || d2 < hole * hole) continue;
-      a.ribo.push(x, y); k++;
-    }
-    if (!c.mito) {
-      // Prokaryotic nucleoid: one very long chromosome crumpled into the middle of the cell.
-      // (A real E. coli chromosome is 1.6 mm long; this is a scaled-down tangle.)
-      a.dna = tangle(rng, 900, 0.035, 0.46);
-    } else {
-      a.nuc = { fx: (rng.next() - 0.5) * 0.3, fy: (rng.next() - 0.5) * 0.3 };
-      a.chrom = tangle(rng, 900, 0.05, 0.85); // chromatin fibres inside the nucleus
-      for (let k = 0; k < 5; k++) a.er.push({ rr: 0.42 + k * 0.045, a0: rng.next() * TAU, span: 1 + rng.next() * 2.2 });
-      const nm = Math.max(2, Math.min(24, Math.round(areaUm2 / 5)));
-      for (let k = 0; k < nm; k++) {
-        const rr = 0.52 + rng.next() * 0.3, th = rng.next() * TAU;
-        a.mitos.push({ fx: Math.cos(th) * rr, fy: Math.sin(th) * rr, ang: rng.next() * Math.PI, s: 0.8 + rng.next() * 0.4 });
-      }
-      if (c.plastid) {
-        const np = Math.max(1, Math.min(4, Math.round(areaUm2 / 20)));
-        for (let k = 0; k < np; k++) {
-          const th = (k / np) * TAU + rng.next(), rr = 0.6;
-          a.plast.push({ fx: Math.cos(th) * rr, fy: Math.sin(th) * rr, ang: th + Math.PI / 2 });
-        }
-      }
-    }
-    c._anat = a;
-    return a;
+  drawPili(c) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    ctx.strokeStyle = 'rgba(230,240,200,0.45)';
+    ctx.lineWidth = Math.max(7 * NM, 0.6 * this.px); // pili are ~7 nm thick
+    ctx.beginPath();
+    for (const l of piliLines(c, this.anatomy(c))) { ctx.moveTo(l.x1 - cx, l.y1 - cy); ctx.lineTo(l.x2 - cx, l.y2 - cy); }
+    ctx.stroke();
   }
+
+  // Procedural anatomy (shared with the inspector): see anatomy.js.
+  anatomy(c) { return buildAnatomy(c); }
 
   drawCellInterior(c) {
     const ctx = this.ctx, a = this.anatomy(c), ppu = this.ppu, px = this.px;
-    const X = c.x - this.cam.x, Y = c.y - this.cam.y, r = c.r;
+    const X = c.x - this.cam.x, Y = c.y - this.cam.y, r = c.r, cx = this.cam.x, cy = this.cam.y;
+    const line = (w) => Math.max(w * NM, 0.8 * px);
+    const big = (units) => units * ppu > 1.5; // worth drawing at this zoom
     // Ribosomes (~22 nm): the protein factories filling the cytoplasm.
     const rib = (DIM.ribosome * NM) / 2;
-    if (rib * 2 * ppu >= 0.8) {
+    const drawRibos = (pts) => {
+      if (rib * 2 * ppu < 0.8) return;
+      const rr = Math.max(rib, 0.5 * px);
       ctx.fillStyle = 'rgba(30,20,50,0.55)';
       ctx.beginPath();
-      const rr = Math.max(rib, 0.5 * px);
-      for (let k = 0; k < a.ribo.length; k += 2) {
-        const x = X + a.ribo[k] * r, y = Y + a.ribo[k + 1] * r;
-        ctx.moveTo(x + rr, y); ctx.arc(x, y, rr, 0, TAU);
-      }
+      for (const q of pts) { ctx.moveTo(q.x - cx + rr, q.y - cy); ctx.arc(q.x - cx, q.y - cy, rr, 0, TAU); }
       ctx.fill();
       if (rib * 2 * ppu > 12) {
-        // Small subunit sitting on the large one.
         ctx.fillStyle = 'rgba(120,100,160,0.7)';
         ctx.beginPath();
-        for (let k = 0; k < a.ribo.length; k += 2) {
-          const x = X + a.ribo[k] * r + rib * 0.5, y = Y + a.ribo[k + 1] * r - rib * 0.5;
-          ctx.moveTo(x + rib * 0.6, y); ctx.arc(x, y, rib * 0.6, 0, TAU);
-        }
+        for (const q of pts) { const x = q.x - cx + rib * 0.5, y = q.y - cy - rib * 0.5; ctx.moveTo(x + rib * 0.6, y); ctx.arc(x, y, rib * 0.6, 0, TAU); }
         ctx.fill();
       }
-    }
-    const line = (w) => Math.max(w * NM, 0.8 * px);
+    };
+    const free = [];
+    for (let k = 0; k < a.ribo.length; k += 2) free.push({ x: c.x + a.ribo[k] * r, y: c.y + a.ribo[k + 1] * r });
+    drawRibos(free);
+    const blob = (fx, fy, rad, fill, stroke) => {
+      ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(X + fx * r, Y + fy * r, rad, 0, TAU); ctx.fill();
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = line(7); ctx.stroke(); }
+    };
+
     if (!c.mito) {
       if (a.thyl) {
         ctx.strokeStyle = 'rgba(60,200,90,0.65)';
         ctx.lineWidth = line(10);
         for (const f of [0.8, 0.72, 0.64]) if (this.bigRing(X, Y, r * f)) ctx.stroke();
       }
+      // Carboxysomes (~120 nm protein shells packed with the CO2-fixing enzyme RuBisCO).
+      for (const g of a.carbox) if (big(0.24)) { ctx.fillStyle = 'rgba(120,200,120,0.8)'; ctx.beginPath(); this.poly(X + g.fx * r, Y + g.fy * r, 60 * NM * g.s, 6, g.ang); ctx.fill(); }
+      // Storage granules.
+      for (const g of a.granules) if (big(0.2)) blob(g.fx, g.fy, 50 * NM * g.s, 'rgba(240,230,190,0.55)');
+      // Plasmids: small rings of DNA.
+      for (const pl of a.plasmids) {
+        if (!big(0.4)) continue;
+        ctx.strokeStyle = c.dna ? 'rgba(225,235,255,0.75)' : 'rgba(255,150,220,0.75)';
+        ctx.lineWidth = line(DIM.dna);
+        ctx.beginPath(); ctx.ellipse(X + pl.fx * r, Y + pl.fy * r, 100 * NM, 70 * NM, pl.ang, 0, TAU); ctx.stroke();
+      }
       this.drawGenome(c, a.dna, c.x, c.y, r, c.dna ? 'dna' : 'rna');
       this.drawInfection(c);
       return;
     }
-    // Endoplasmic reticulum.
+    // Microtubules radiating from the centrosome (25 nm tubes of tubulin).
+    ctx.strokeStyle = 'rgba(160,220,255,0.35)';
+    ctx.lineWidth = line(25);
+    ctx.beginPath();
+    for (const m of microtubules(c, a)) { ctx.moveTo(m.x1 - cx, m.y1 - cy); ctx.lineTo(m.x2 - cx, m.y2 - cy); }
+    ctx.stroke();
+    if (25 * NM * ppu > 6) this.drawTubulin(c, a);
+    // Endoplasmic reticulum, studded with ribosomes (rough ER).
     ctx.strokeStyle = 'rgba(190,170,230,0.35)';
     ctx.lineWidth = line(50);
     for (const e of a.er) { ctx.beginPath(); ctx.arc(X, Y, e.rr * r, e.a0, e.a0 + e.span); ctx.stroke(); }
+    if (rib * 2 * ppu >= 0.8) drawRibos(erRibosomes(c, a));
+    // Golgi apparatus: a stack of flattened cisternae, budding transport vesicles.
+    ctx.strokeStyle = 'rgba(255,200,120,0.85)';
+    ctx.lineWidth = line(30);
+    for (const cis of golgiCisternae(c, a)) {
+      ctx.beginPath();
+      cis.pts.forEach((q, i) => (i ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy)));
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255,200,120,0.85)';
+    ctx.beginPath();
+    for (const v of golgiVesicles(c, a)) { ctx.moveTo(v.x - cx + v.r, v.y - cy); ctx.arc(v.x - cx, v.y - cy, Math.max(v.r, 0.5 * px), 0, TAU); }
+    ctx.fill();
+    // Centrosome: two centrioles at right angles (~250 × 500 nm).
+    {
+      const o = a.centro, q = { x: c.x + o.fx * r - cx, y: c.y + o.fy * r - cy };
+      ctx.fillStyle = 'rgba(180,230,255,0.25)';
+      ctx.beginPath(); ctx.arc(q.x, q.y, 500 * NM, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(200,240,255,0.9)';
+      for (const ang of [o.ang, o.ang + Math.PI / 2]) {
+        ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(ang);
+        ctx.fillRect(-250 * NM, -125 * NM, 500 * NM, 250 * NM);
+        ctx.restore();
+      }
+    }
+    // Lysosomes (digestive sacs) and peroxisomes.
+    for (const l of a.lyso) blob(l.fx, l.fy, 250 * NM * l.s, 'rgba(255,120,140,0.6)', 'rgba(255,170,180,0.8)');
+    for (const l of a.perox) blob(l.fx, l.fy, 200 * NM * l.s, 'rgba(255,240,140,0.55)', 'rgba(255,250,190,0.8)');
+    if (a.vacuole) blob(a.vacuole.fx, a.vacuole.fy, a.vacuole.r * r, 'rgba(150,200,255,0.25)', 'rgba(190,225,255,0.7)');
     // Nucleus with double envelope, pores, chromatin and nucleolus.
     const nr = 0.34 * r;
     ctx.fillStyle = 'rgba(40,25,70,0.85)';
@@ -832,17 +850,21 @@ export class Renderer {
     const pore = (DIM.nuclearPore * NM) / 2;
     if (pore * 2 * ppu >= 2) {
       ctx.fillStyle = 'rgba(255,240,200,0.9)';
-      const np = Math.round((TAU * nr) / (500 * NM));
       ctx.beginPath();
-      for (let k = 0; k < np; k++) {
-        const th = (k / np) * TAU, x = X + Math.cos(th) * (nr + gap / 2), y = Y + Math.sin(th) * (nr + gap / 2);
-        ctx.moveTo(x + pore, y); ctx.arc(x, y, pore, 0, TAU);
-      }
+      for (const q of nuclearPores(c)) { if (!this.inView(q.x, q.y, pore)) continue; ctx.moveTo(q.x - cx + pore, q.y - cy); ctx.arc(q.x - cx, q.y - cy, pore, 0, TAU); }
       ctx.fill();
+      if (pore * 2 * ppu > 30) {
+        // Eight-fold symmetric pore complex.
+        ctx.fillStyle = 'rgba(160,120,90,0.9)';
+        for (const q of nuclearPores(c)) {
+          if (!this.inView(q.x, q.y, pore)) continue;
+          for (let k = 0; k < 8; k++) { const th = (k / 8) * TAU; ctx.beginPath(); ctx.arc(q.x - cx + Math.cos(th) * pore * 0.75, q.y - cy + Math.sin(th) * pore * 0.75, pore * 0.18, 0, TAU); ctx.fill(); }
+        }
+      }
     }
     // Chloroplasts with stacked thylakoids (grana).
     for (const p of a.plast) {
-      const L = Math.min(8, r * 0.75), W = L * 0.45;
+      const { L, W } = plastSize(c);
       ctx.save();
       ctx.translate(X + p.fx * r, Y + p.fy * r);
       ctx.rotate(p.ang);
@@ -852,17 +874,21 @@ export class Renderer {
       ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); ctx.stroke();
       if (L * ppu > 25) {
         ctx.fillStyle = 'rgba(10,70,25,0.85)';
-        const gw = L * 0.1, gh = W * 0.06;
-        for (let g = 0; g < 4; g++) {
-          const gx = -L * 0.3 + g * L * 0.2;
-          for (let s = 0; s < 5; s++) ctx.fillRect(gx - gw / 2, -W * 0.18 + s * gh * 1.6, gw, gh);
+        for (const g of grana(L, W)) for (const d of g.discs) ctx.fillRect(d.x, d.y, d.w, d.h);
+        // cpDNA
+        ctx.strokeStyle = 'rgba(225,235,255,0.6)'; ctx.lineWidth = line(DIM.dna);
+        ctx.beginPath(); ctx.ellipse(L * 0.3, W * 0.22, W * 0.08, W * 0.05, 0, 0, TAU); ctx.stroke();
+        if (L / 40 * ppu > 6) {
+          // Photosystems on the thylakoid discs (~20 nm complexes).
+          ctx.fillStyle = 'rgba(120,255,140,0.9)';
+          for (const g of grana(L, W)) for (const d of g.discs) for (let q = 0; q < 6; q++) ctx.fillRect(d.x + (q + 0.3) * d.w / 6, d.y - 10 * NM, 18 * NM, 10 * NM);
         }
       }
       ctx.restore();
     }
     // Mitochondria (~1 × 0.5 µm) with folded inner membranes (cristae).
     for (const m of a.mitos) {
-      const L = Math.min((DIM.mitoLen * NM) * m.s, r * 0.5), W = L / 2;
+      const { L, W } = mitoSize(c, m);
       ctx.save();
       ctx.translate(X + m.fx * r, Y + m.fy * r);
       ctx.rotate(m.ang);
@@ -872,15 +898,41 @@ export class Renderer {
       ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); ctx.stroke();
       if (L * ppu > 25) {
         ctx.beginPath();
-        for (let k = 1; k <= 5; k++) {
-          const x = -L / 2 + (k / 6) * L, s = k & 1 ? 1 : -1;
-          ctx.moveTo(x, s * W * 0.48); ctx.lineTo(x, -s * W * 0.15);
-        }
+        for (const k of cristae(L, W)) { ctx.moveTo(k.x, k.y1); ctx.lineTo(k.x, k.y2); }
         ctx.stroke();
+        // mtDNA loop in the matrix.
+        ctx.strokeStyle = 'rgba(225,235,255,0.7)'; ctx.lineWidth = line(DIM.dna);
+        ctx.beginPath(); ctx.ellipse(L * 0.18, 0, W * 0.12, W * 0.08, 0, 0, TAU); ctx.stroke();
+        if (10 * NM * ppu > 4) {
+          // ATP synthase heads lining the cristae, every ~20 nm.
+          ctx.fillStyle = 'rgba(255,230,120,0.95)';
+          for (const k of cristae(L, W)) {
+            const n = Math.floor(Math.abs(k.y2 - k.y1) / (20 * NM));
+            for (let q = 0; q < n; q++) { const y = k.y1 + (k.y2 - k.y1) * (q + 0.5) / n; ctx.beginPath(); ctx.arc(k.x + 8 * NM, y, 5 * NM, 0, TAU); ctx.fill(); }
+          }
+        }
       }
       ctx.restore();
     }
     this.drawInfection(c);
+  }
+
+  // Tubulin dimers (8 nm) along microtubules, only near the camera.
+  drawTubulin(c, a) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    for (const m of microtubules(c, a)) {
+      const L = Math.hypot(m.x2 - m.x1, m.y2 - m.y1), ux = (m.x2 - m.x1) / L, uy = (m.y2 - m.y1) / L, step = 8 * NM;
+      // Only the stretch that is on screen.
+      const vx = (this.v.x0 + this.v.x1) / 2 - m.x1, vy = (this.v.y0 + this.v.y1) / 2 - m.y1;
+      const along = vx * ux + vy * uy, half = Math.hypot(this.v.x1 - this.v.x0, this.v.y1 - this.v.y0) / 2;
+      const s0 = Math.max(0, along - half), s1 = Math.min(L, along + half);
+      if (s1 <= s0 || Math.abs(vx * uy - vy * ux) > half + 15 * NM) continue;
+      for (let s = Math.floor(s0 / step) * step; s < s1; s += step) {
+        const k = Math.round(s / step);
+        ctx.fillStyle = k & 1 ? 'rgba(150,210,255,0.9)' : 'rgba(90,160,230,0.9)'; // alpha / beta tubulin
+        for (const off of [-8, 0, 8]) ctx.fillRect(m.x1 + ux * s - uy * off * NM - cx - 2 * NM, m.y1 + uy * s + ux * off * NM - cy - 2 * NM, 4 * NM, 4 * NM);
+      }
+    }
   }
 
   // Genetic material at every scale: a tangle from afar; a double helix with base pairs (DNA) or a
@@ -968,15 +1020,10 @@ export class Renderer {
   // New virus capsids piling up inside an infected cell until it bursts.
   drawInfection(c) {
     if (!c.infected) return;
-    const inf = c.infected, prog = Math.min(1, (this.time - inf.since) / Math.max(1, inf.t - inf.since));
-    const n = Math.floor(prog * 24), R = DIM.virus * NM, ctx = this.ctx;
+    const R = DIM.virus * NM, ctx = this.ctx;
     if (R * this.ppu < 1) return;
-    const rng = new RNG((c.id * 31337) >>> 0);
     ctx.fillStyle = 'rgba(200,240,110,0.85)';
-    for (let k = 0; k < n; k++) {
-      const a = rng.next() * TAU, rr = Math.sqrt(rng.next()) * 0.8 * c.r;
-      ctx.beginPath(); this.poly(c.x + Math.cos(a) * rr - this.cam.x, c.y + Math.sin(a) * rr - this.cam.y, R, 6, 0); ctx.fill();
-    }
+    for (const q of capsids(c, this.time)) { ctx.beginPath(); this.poly(q.x - this.cam.x, q.y - this.cam.y, R, 6, 0); ctx.fill(); }
   }
 
   drawViruses(world) {
