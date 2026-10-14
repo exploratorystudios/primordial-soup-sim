@@ -17,6 +17,7 @@ const SERIES = [
   ['hetero', 'Heterotrophs', '#9b77f0'],
   ['pred', 'Predators', '#f04a5a'],
   ['euk', 'Eukaryotes', '#ffffff'],
+  ['viruses', 'Viruses', '#d4ff6a'],
   ['colony', 'In colonies', '#4fd2ff'],
   ['o2', 'O₂ ×100', '#7f8da3'],
 ];
@@ -72,6 +73,7 @@ export class UI {
     const era = world.era();
     $('era-name').textContent = era.name;
     $('era-desc').textContent = era.desc;
+    $('era-earth').textContent = `On Earth: ${era.earth}`;
 
     while (this.seenLogs < world.logs.length) {
       const l = world.logs[this.seenLogs++];
@@ -103,12 +105,19 @@ export class UI {
       ['Abiogenesis events', L.origins],
       ['Species alive', st.speciesAlive],
       ['Deepest generation', st.maxGen],
+      ['Protein-making cells', st.proteinCells],
+      ['DNA genomes', st.dnaCells],
       ['Eukaryotes', st.euk],
+      ['Sexual births', fmt(st.sexualBirths || 0)],
       ['Algae (with plastids)', st.plastid],
       ['Cells in colonies', st.inColonies],
       ['Multicellular organisms', st.multicellular],
       ['Complex organisms', st.complex],
       ['Largest organism', big ? `${big.size} cells` : '—'],
+      ['Viruses'],
+      ['Virus particles', world.viruses ? world.viruses.list.length : 0],
+      ['Virus lineages', world.viruses ? world.viruses.lineages : 0],
+      ['Infected cells', st.infected],
       ['Environment'],
       ['Mean oxygen', world.o2.toFixed(2)],
       ['Births / deaths', `${fmt(L.births)} / ${fmt(Object.values(L.deaths).reduce((a, b) => a + b, 0))}`],
@@ -228,6 +237,9 @@ export class UI {
       <div class="insp-kv">
         <span>Diameter</span><span>${formatLen(c.r * 2 * NM_PER_UNIT)}</span>
         <span>Strategy</span><span>${TROPH_NAMES[c.troph]}</span>
+        <span>Genome</span><span>${c.dna ? 'DNA' : 'RNA'} · proteins ${Math.round(c.transl * 100)}%</span>
+        ${c.infected ? `<span>Status</span><span style="color:#d4ff6a">infected (virus lineage #${c.infected.lineage})</span>` : ''}
+        ${c.sexual ? '<span>Born</span><span>sexually</span>' : ''}
         <span>Species</span><span style="color:${c.hueColor}">#${c.species}${sp ? `, born tick ${sp.born.toLocaleString()}` : ''}</span>
         <span>Generation</span><span>${c.gen} (lineage ${c.origin})</span>
         <span>Energy</span><span>${c.energy.toFixed(1)} / ${c.cap.toFixed(0)}</span>
@@ -235,7 +247,7 @@ export class UI {
         <span>Organism</span><span>${c.orgSize > 1 ? `${c.orgSize} cells${org ? `, ${org.kind}` : ''}` : 'single cell'}</span>
         ${c.orgSize > 1 ? `<span>Cell fate</span><span style="color:${TYPE_COLORS[c.type]}">${TYPE_NAMES[c.type]}</span>` : ''}
       </div>
-      ${[Gn.SIZE, Gn.PHOTO, Gn.CHEMO, Gn.HETERO, Gn.PRED, Gn.MOTIL, Gn.AEROBIC, Gn.ARMOR, Gn.ADHES].map(bar).join('')}
+      ${[Gn.SIZE, Gn.PHOTO, Gn.CHEMO, Gn.HETERO, Gn.PRED, Gn.MOTIL, Gn.AEROBIC, Gn.ARMOR, Gn.ADHES, Gn.TRANSL, Gn.DNAG, Gn.SEX, Gn.RESIST].map(bar).join('')}
       ${c.founderSeq ? `<p class="muted">Founded by replicator:</p><div class="seq">${seqHTML(c.founderSeq)}</div>` : ''}`;
   }
 

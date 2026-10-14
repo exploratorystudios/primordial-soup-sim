@@ -15,6 +15,13 @@ npm start            # http://localhost:8080 (or the next free port; PORT=5173 n
 
 No dependencies or build step: plain ES modules. `?seed=42&speed=6` in the URL picks a world and speed.
 
+Check that every stage of evolution still emerges (and how often), across many worlds in parallel:
+
+```bash
+npm run check -- --seeds 1-8 --ticks 70000          # table of when each milestone happened, per seed
+node check-evolution.mjs --seeds 1-20 --md tape.md  # also write a markdown report
+```
+
 Headless (no browser), useful for tuning:
 
 ```bash
@@ -41,8 +48,12 @@ narration in `video/make-script.mjs` together, then regenerate the script so the
 
 ## Controls
 
-- **Scroll** zoom (habitat → single molecules) · **drag** pan · **click** inspect anything · **double-click** follow it
-- **Space** pause · **+ / -** speed · **Esc** deselect
+- **Scroll** zoom (habitat → single molecules) · **drag** pan
+- **Click** selects the outermost thing under the cursor (an organism, protocell, strand, molecule or virus). **Click again inside the selection** to select the part under the cursor, one level deeper; click inside a parent to pick a sibling; click outside to start over. **Esc** goes up a level. Clicking never moves the camera.
+- **F** (or the inspector's Follow button) keeps the camera on the selection, wherever it is on screen
+- **Space** pause · **+ / -** speed. At speeds below one tick per frame, motion is smoothly interpolated between ticks; paused means truly frozen.
+- **⏭ Next milestone** runs at full speed until something new happens · **Tour** flies the camera through what exists in this world, with captions
+- **Save world / Load world** write and resume a compressed `.json.gz` snapshot; a resumed world continues exactly as the original would have
 - Colour cells by metabolism, by species (neutral pigment gene, so related lineages share a hue), or by cell type
 - Overlays show vent chemicals, organic matter, oxygen and nutrients
 - Planetary events: asteroid impact (mass extinction + impact winter), Snowball Earth, volcanic surge
@@ -51,7 +62,7 @@ narration in `video/make-script.mjs` together, then regenerate the script so the
 ## True scale and zooming down to molecules
 
 Everything is drawn at its real physical size: **1 world unit = 0.5 µm**, so the habitat is a
-0.7 × 0.45 mm patch of ocean. A scale bar and field-of-view readout (bottom left) show where you are.
+1.6 × 0.9 mm patch of ocean. A scale bar and field-of-view readout (bottom left) show where you are.
 Zoom presets jump between levels: *Habitat → Organism (120 µm) → Cell (15 µm) → Interior (1.5 µm) →
 Membrane (150 nm) → Molecule (15 nm)*.
 
@@ -62,9 +73,10 @@ Membrane (150 nm) → Molecule (15 nm)*.
 | membrane | 4 nm bilayer of individual lipids (fatty acids in protocells, two-tailed phospholipids in cells) |
 | ribosome | 22 nm (70S) / 25 nm (80S) |
 | protocell | 5–10 µm |
-| prokaryote | 2.5–7.5 µm, with nucleoid DNA, ribosomes, flagellum (20 nm thick), thylakoids if photosynthetic |
-| eukaryote | 4–13 µm, with nucleus (double envelope, 100 nm pores), mitochondria (~1 µm), chloroplasts, ER |
-| colony / organism | tens of µm |
+| virus | ~100 nm head and 200 nm tail: capsid, packed genome, tail fibres |
+| prokaryote | 1–3.5 µm, with a dense nucleoid (a 2 nm double helix with base pairs up close, or a single-stranded RNA genome in early cells), ribosomes, flagellum (20 nm thick), thylakoids if photosynthetic |
+| eukaryote | 6–30 µm, with nucleus (double envelope, 100 nm pores, chromatin on 11 nm nucleosomes), mitochondria (~1 µm), chloroplasts, ER, 250 nm flagellum |
+| colony / organism | tens to hundreds of µm |
 
 Things smaller than a pixel are shown as single specks; they are never enlarged.
 
@@ -74,7 +86,7 @@ strand, vesicle and cell. Sub-cellular anatomy (organelles, ribosomes, individua
 motility). It is not simulated molecule by molecule, which would need ~10¹⁶ molecules for even a
 small droplet. The prebiotic soup is also far more dilute than a real ocean, and water molecules are
 not drawn. Two things are not to scale at all: the environment's gradients (sunlit surface to deep
-vents spans hundreds of metres, compressed here into 0.45 mm) and time.
+vents spans hundreds of metres, compressed here into 0.9 mm) and time. Era banners give a rough "on Earth" date for orientation; ticks are not years.
 
 ### Inspecting parts
 
@@ -105,7 +117,10 @@ of a molecule.
 - **Reproduction** by division with point mutations and occasional large-effect mutations. **Horizontal gene transfer** between touching prokaryotes.
 - **Limiting nutrient**: a phosphate-like nutrient locked in bodies and recycled on death caps the biosphere. Vents and surface weathering add more, and burial removes it.
 - **Oxygen**: oxygenic photosynthesis releases O₂. Reduced vent chemicals mop it up, so the Great Oxidation Event lags behind the origin of photosynthesis. O₂ is toxic to unadapted cells and greatly boosts aerobic respiration.
-- **Viruses** cull dense patches ("kill the winner").
+- **RNA world → DNA and proteins**: the first cells run on ribozymes and keep their genes in RNA. Evolving protein translation makes every metabolic pathway more efficient; a DNA genome lowers the mutation rate and avoids constant RNA repair (worse once oxygen appears). Both benefits rise gradually with their genes. Only DNA-genome, protein-making cells can become eukaryotes.
+- **Viruses as particles** (`js/viruses.js`): once life is common, selfish genetic elements escape as viruses. They drift, decay in surface UV, and infect cells whose two receptor genes match their binding key; the cell is hijacked, then bursts and releases mutated copies. Hosts escape by mutating receptors or investing in a CRISPR-like defence, so an arms race emerges. Viruses sometimes deliver a gene from their last host (transduction).
+- **Sex**: eukaryotes can recombine their genome with a nearby mate of their own kind. It costs both parents energy; its payoff (shuffling receptors and good mutations) has to emerge.
+- **Metabolic scaling**: costs and gains scale with size^0.75 (as Kleiber's law suggests), so large eukaryotes are viable but few.
 - **Predation**: big cells engulf smaller ones. Being part of a large colony protects you.
 - **Endosymbiosis**: occasionally an engulfed aerobe survives as a mitochondrion. This creates a **eukaryote**: bigger, with more energy capacity, and inherited by its descendants. A eukaryote that engulfs a phototroph may keep it as a chloroplast and become an **alga**.
 - **Speciation**: a new species is recorded when a lineage drifts far enough from its species' founding genome. Together these records form the phylogeny.
@@ -124,9 +139,13 @@ of a molecule.
 | `js/world.js` | environment (light, vents, currents, fields), milestones, eras, events |
 | `js/chemistry.js` | monomers, polymers, ribozymes, vesicles, protocells |
 | `js/life.js` | cells, metabolism, behaviour, predation, endosymbiosis, colonies, species |
-| `js/genome.js` | gene layout, mutation, genetic distance |
+| `js/genome.js` | gene layout, mutation, recombination, genetic distance |
+| `js/viruses.js` | virus particles, infection, lysis, transduction |
+| `js/persist.js` | save / load worlds |
+| `js/tour.js` | guided camera tour |
 | `js/fields.js`, `js/spatial.js` | diffusing chemical grids, spatial hash |
 | `js/render.js` | true-scale renderer with semantic zoom (molecules, bilayers, organelles) |
 | `js/parts.js` | part hierarchy for the inspector, deep picking |
 | `js/ui.js`, `js/main.js` | side panel, main loop, camera and input |
-| `headless.js` | run without a browser |
+| `headless.js` | run one world without a browser |
+| `check-evolution.mjs` | "replay the tape of life": many seeds in parallel, reports when each stage emerged |

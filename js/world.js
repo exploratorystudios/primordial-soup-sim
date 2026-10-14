@@ -4,6 +4,7 @@ import { RNG } from './rng.js';
 import { Fields } from './fields.js';
 import { Soup } from './chemistry.js';
 import { Life } from './life.js';
+import { Viruses } from './viruses.js';
 
 export const MILESTONES = [
   ['polymer', 'First polymer'],
@@ -11,6 +12,9 @@ export const MILESTONES = [
   ['replicator', 'First replicator'],
   ['protocell', 'First protocell'],
   ['cell', 'First living cell'],
+  ['translation', 'Proteins & genetic code'],
+  ['dna', 'DNA genome'],
+  ['virus', 'First virus'],
   ['hgt', 'Horizontal gene transfer'],
   ['predator', 'First predator'],
   ['photo', 'Photosynthesis'],
@@ -18,6 +22,7 @@ export const MILESTONES = [
   ['aerobic', 'Aerobic respiration'],
   ['eukaryote', 'First eukaryote'],
   ['plastid', 'First alga (chloroplast)'],
+  ['sex', 'Sexual reproduction'],
   ['colony', 'First colony'],
   ['multicellular', 'Multicellular organism'],
   ['germline', 'Germ-soma life cycle'],
@@ -25,16 +30,19 @@ export const MILESTONES = [
   ['cambrian', 'Cambrian-style radiation'],
 ];
 
+// [milestone, name, description, when this happened on Earth]. Ticks are not years: chemistry
+// runs in seconds and evolution over millions of years, so the dates are a guide, not a clock.
 const ERAS = [
-  [null, 'Hadean Ocean', 'Lightning, UV and hydrothermal vents forge simple organic molecules.'],
-  ['polymer', 'Prebiotic Chemistry', 'Monomers condense into chains on mineral surfaces near the vents.'],
-  ['replicator', 'RNA World', 'Some chains fold into ribozymes that copy themselves, with errors.'],
-  ['protocell', 'Protocell Era', 'Fatty-acid vesicles trap replicators; lineages of protocells compete.'],
-  ['cell', 'Archean: Age of Microbes', 'Living cells evolve by mutation and natural selection.'],
-  ['goe', 'Great Oxidation', 'Photosynthesis floods the ocean with oxygen: poison for some, power for others.'],
-  ['eukaryote', 'Proterozoic: Eukaryotes', 'Endosymbiosis creates complex cells with mitochondria.'],
-  ['multicellular', 'Multicellular Life', 'Cells stick together, divide labour and become organisms.'],
-  ['cambrian', 'Cambrian Radiation', 'Many lineages of complex organisms diversify.'],
+  [null, 'Hadean Ocean', 'Lightning, UV and hydrothermal vents forge simple organic molecules.', '~4.4–4.0 billion years ago'],
+  ['polymer', 'Prebiotic Chemistry', 'Monomers condense into chains on mineral surfaces near the vents.', '~4.2–3.8 billion years ago (hypothesized)'],
+  ['replicator', 'RNA World', 'Some chains fold into ribozymes that copy themselves, with errors.', '~4 billion years ago (hypothesized)'],
+  ['protocell', 'Protocell Era', 'Fatty-acid vesicles trap replicators; lineages of protocells compete.', 'before ~3.8 billion years ago (hypothesized)'],
+  ['cell', 'Archean: Age of Microbes', 'Living cells evolve by mutation and natural selection.', 'from ~3.7 billion years ago'],
+  ['dna', 'Archean: DNA & Proteins', 'Proteins take over the chemistry and DNA becomes the archive of genes.', 'before the last common ancestor, >3.5 billion years ago'],
+  ['goe', 'Great Oxidation', 'Photosynthesis floods the ocean with oxygen: poison for some, power for others.', '~2.4 billion years ago'],
+  ['eukaryote', 'Proterozoic: Eukaryotes', 'Endosymbiosis creates complex cells with mitochondria.', '~2.0–1.6 billion years ago'],
+  ['multicellular', 'Multicellular Life', 'Cells stick together, divide labour and become organisms.', 'complex multicellularity from ~1.6 billion years ago'],
+  ['cambrian', 'Cambrian Radiation', 'Many lineages of complex organisms diversify.', '~540 million years ago'],
 ];
 
 export class World {
@@ -59,8 +67,14 @@ export class World {
     this.o2 = 0;
     this.soup = new Soup(this);
     this.life = new Life(this);
+    this.viruses = new Viruses(this);
     this.phase = this.rng.next() * 1000;
     this.fields.nutrient.fill(CFG.NUT_INIT);
+    // Light attenuation with depth, tabulated every 2 units (1 µm).
+    this.sunTable = new Float32Array(Math.ceil(CFG.H / 2) + 1);
+    for (let i = 0; i < this.sunTable.length; i++) this.sunTable[i] = Math.exp((-CFG.LIGHT_DEPTH * i * 2) / CFG.H);
+    this.sunScale = 0.5;
+    this.smooth = false; // capture start-of-tick positions for smooth slow-motion rendering
     this.curX = new Float32Array(this.fields.n);
     this.curY = new Float32Array(this.fields.n);
     this.updateCurrents();
@@ -68,7 +82,9 @@ export class World {
 
   // -------------------------------------------------------------- environment
   sunAt(y) {
-    return this.dayFactor * this.lightMul * Math.exp((-CFG.LIGHT_DEPTH * y) / CFG.H);
+    let i = (y * this.sunScale) | 0;
+    if (i < 0) i = 0; else if (i >= this.sunTable.length) i = this.sunTable.length - 1;
+    return this.dayFactor * this.lightMul * this.sunTable[i];
   }
 
   lightAt(x, y) {
@@ -104,9 +120,10 @@ export class World {
 
   // Hot water rises from the vents.
   plume(x, y) {
-    if (y < CFG.H - 260) return 0;
+    const reach = CFG.H * CFG.PLUME_REACH;
+    if (y < CFG.H - reach) return 0;
     for (const v of this.vents) {
-      if (Math.abs(x - v.x) < 35) return -0.45 * (1 - (CFG.H - y) / 260);
+      if (Math.abs(x - v.x) < 35) return -0.45 * (1 - (CFG.H - y) / reach);
     }
     return 0;
   }
@@ -130,23 +147,33 @@ export class World {
     // Oxygen is mopped up by reduced chemicals (and, implicitly, dissolved iron): the
     // reason the Great Oxidation Event lagged behind the origin of photosynthesis.
     const chem = F.chem, oxy = F.oxygen;
-    for (let i = 0; i < F.n; i++) {
-      const r = Math.min(chem[i], oxy[i]) * CFG.OXY_REACT;
-      chem[i] -= r; oxy[i] -= r;
+    if (this.t % 2 === 1 && this.mset.has('photo')) {
+      const k = 1 - (1 - CFG.OXY_REACT) * (1 - CFG.OXY_REACT); // two ticks' worth
+      for (let i = 0; i < F.n; i++) {
+        const o = oxy[i];
+        if (o <= 0) continue;
+        const r = Math.min(chem[i], o) * k;
+        chem[i] -= r; oxy[i] = o - r;
+      }
     }
-    F.diffuse(F.chem, CFG.CHEM_DIFF, CFG.CHEM_DECAY);
-    F.diffuse(F.organic, CFG.ORG_DIFF, CFG.ORG_DECAY);
-    F.diffuse(F.oxygen, CFG.OXY_DIFF, CFG.OXY_DECAY);
-    F.diffuse(F.nutrient, CFG.NUT_DIFF, CFG.NUT_BURIAL);
+    // Fields change slowly: diffuse every other tick at twice the rate (same transport, half the cost).
+    if (this.t % 2 === 0) {
+      const d2 = (x) => 1 - (1 - x) * (1 - x);
+      F.diffuse(F.chem, CFG.CHEM_DIFF * 2, d2(CFG.CHEM_DECAY));
+      F.diffuse(F.organic, CFG.ORG_DIFF * 2, d2(CFG.ORG_DECAY));
+      F.diffuse(F.oxygen, Math.min(1, CFG.OXY_DIFF * 2), d2(CFG.OXY_DECAY));
+      F.diffuse(F.nutrient, Math.min(1, CFG.NUT_DIFF * 2), d2(CFG.NUT_BURIAL));
+    }
   }
 
   // --------------------------------------------------------------------- step
   step() {
-    this.capturePrev();
+    if (this.smooth) this.capturePrev();
     this.dayFactor = 0.65 + 0.35 * Math.sin((this.t * 2 * Math.PI) / CFG.DAY_LENGTH);
     if (this.t % 20 === 0) this.updateCurrents();
     this.stepFields();
-    this.soup.step();
+    // Once life is established the soup is a slow-changing backdrop: step it every third tick.
+    if (this.life.cells.length < CFG.MAX_ORIGINS_POP * 1.5 || this.t % 3 === 0) this.soup.step();
     this.life.step();
     if (this.t % 100 === 0) {
       this.life.census();
@@ -160,6 +187,8 @@ export class World {
 
   checkMilestones() {
     const st = this.life.stats;
+    if (st.proteinCells >= 10) this.milestone('translation', 'Proteins take over: ribosomes and a genetic code replace ribozymes');
+    if (st.dnaCells >= 10) this.milestone('dna', 'DNA becomes the genome: a stable archive replaces fragile RNA');
     if (st.photosynthesizers >= 15) this.milestone('photo', 'Photosynthesis evolves: life taps sunlight');
     if (this.o2 > 0.5) this.milestone('goe', 'The Great Oxidation Event: free oxygen accumulates in the ocean');
     if (st.aerobic >= 15) this.milestone('aerobic', 'Aerobic respiration evolves: oxygen becomes fuel');
@@ -184,7 +213,7 @@ export class World {
   era() {
     let e = ERAS[0];
     for (const er of ERAS) if (er[0] === null || this.mset.has(er[0])) e = er;
-    return { name: e[1], desc: e[2] };
+    return { name: e[1], desc: e[2], earth: e[3] };
   }
 
   record() {
@@ -193,7 +222,7 @@ export class World {
       t: this.t,
       mono: s.n, poly: s.polymers.length, ves: s.vesicles.length, rep: s.stats.replicators, proto: s.stats.protocells,
       cells: this.life.cells.length, photo: st.photo, chemo: st.chemo, hetero: st.hetero, pred: st.pred,
-      euk: st.euk, colony: st.inColonies, species: st.speciesAlive, o2: this.o2,
+      euk: st.euk, colony: st.inColonies, species: st.speciesAlive, o2: this.o2, viruses: this.viruses.list.length,
     });
     if (this.history.length > 1500) {
       this.history = this.history.filter((_, i) => i % 2 === 0);
@@ -213,7 +242,7 @@ export class World {
   // Temporarily move everything to its interpolated position (alpha 0 = start of tick, 1 = end).
   // Must be paired with endInterp(); the simulation never sees these positions.
   beginInterp(alpha) {
-    this._interp = alpha < 0.999;
+    this._interp = this.smooth && alpha < 0.999;
     if (!this._interp) return;
     const lerp = (a, b) => a + (b - a) * alpha;
     const fix = (o) => { if (o.x0 === undefined) return; o._sx = o.x; o._sy = o.y; o.x = lerp(o.x0, o.x); o.y = lerp(o.y0, o.y); };

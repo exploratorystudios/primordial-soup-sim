@@ -37,6 +37,27 @@ const OVERLAY = {
 };
 const TAU = Math.PI * 2;
 
+// A deterministic "sequence" for drawn DNA so a given cell always shows the same bases.
+export function dnaBase(seed, seg, k) {
+  let h = Math.imul(seed + 0x9e3779b9, 0x85ebca6b) ^ Math.imul(seg + 1, 0xc2b2ae35) ^ Math.imul(k + 7, 0x27d4eb2f);
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
+  return (h >>> 0) & 3;
+}
+
+// A smooth random walk confined to a disc: how a long polymer crumples inside a small space.
+function tangle(rng, n, step, rad) {
+  const out = [];
+  let x = 0, y = 0, th = rng.next() * TAU;
+  for (let k = 0; k < n; k++) {
+    th += (rng.next() - 0.5) * 1.2;
+    x += Math.cos(th) * step; y += Math.sin(th) * step;
+    const d = Math.hypot(x, y);
+    if (d > rad) { x *= rad / d; y *= rad / d; th += Math.PI * 0.8; }
+    out.push(x, y);
+  }
+  return out;
+}
+
 export function formatLen(nm) {
   const p = (v) => String(+v.toPrecision(3));
   if (nm < 1000) return `${p(nm)} nm`;
@@ -174,6 +195,7 @@ export class Renderer {
     this.drawVents(world);
     if (opts.showChem) this.drawChemistry(world);
     this.drawLife(world, opts);
+    this.drawViruses(world);
 
     if (opts.selected) this.drawSelection(opts.selected);
     if (opts.flash) {
@@ -601,36 +623,26 @@ export class Renderer {
 
   // Procedural anatomy, generated deterministically from the cell's id and state.
   anatomy(c) {
-    const key = (c.mito ? 1 : 0) | (c.plastid ? 2 : 0) | (c.effP > 0.25 ? 4 : 0);
+    const key = (c.mito ? 1 : 0) | (c.plastid ? 2 : 0) | (c.effP > 0.25 ? 4 : 0) | (c.dna ? 8 : 0) | (Math.round(c.transl * 4) << 4);
     const old = c._anat;
     if (old && old.key === key && old.r === c.r) return old;
     const rng = new RNG((Math.imul(c.id, 2654435761) ^ 0x9e3779b9) >>> 0);
     const a = { key, r: c.r, ribo: [], dna: [], chrom: [], mitos: [], plast: [], er: [], nuc: null, thyl: !c.mito && c.effP > 0.25 };
     const rUm = c.r * 0.5, areaUm2 = Math.PI * rUm * rUm;
     const hole = c.mito ? 0.4 : 0;
-    const nr = Math.min(700, Math.round(areaUm2 * 45));
+    const nr = Math.min(700, Math.round(areaUm2 * 45 * (0.3 + 0.7 * c.transl)));
     for (let k = 0, tries = 0; k < nr && tries < nr * 5; tries++) {
       const x = rng.next() * 2 - 1, y = rng.next() * 2 - 1, d2 = x * x + y * y;
       if (d2 > 0.86 || d2 < hole * hole) continue;
       a.ribo.push(x, y); k++;
     }
     if (!c.mito) {
-      // Prokaryotic nucleoid: one long circular chromosome, tangled in the middle.
-      const ph = rng.next() * TAU;
-      for (let k = 0; k < 120; k++) {
-        const th = (k / 120) * TAU;
-        const rr = 0.1 + 0.32 * Math.abs(Math.sin(th * 3 + ph)) + 0.05 * rng.next();
-        a.dna.push(Math.cos(th * 2 + ph) * rr, Math.sin(th * 3) * rr * 0.9);
-      }
+      // Prokaryotic nucleoid: one very long chromosome crumpled into the middle of the cell.
+      // (A real E. coli chromosome is 1.6 mm long; this is a scaled-down tangle.)
+      a.dna = tangle(rng, 900, 0.035, 0.46);
     } else {
       a.nuc = { fx: (rng.next() - 0.5) * 0.3, fy: (rng.next() - 0.5) * 0.3 };
-      let x = 0, y = 0;
-      for (let k = 0; k < 70; k++) {
-        const th = rng.next() * TAU;
-        x += Math.cos(th) * 0.14; y += Math.sin(th) * 0.14;
-        const d = Math.hypot(x, y); if (d > 0.8) { x *= 0.8 / d; y *= 0.8 / d; }
-        a.chrom.push(x, y);
-      }
+      a.chrom = tangle(rng, 900, 0.05, 0.85); // chromatin fibres inside the nucleus
       for (let k = 0; k < 5; k++) a.er.push({ rr: 0.42 + k * 0.045, a0: rng.next() * TAU, span: 1 + rng.next() * 2.2 });
       const nm = Math.max(2, Math.min(24, Math.round(areaUm2 / 5)));
       for (let k = 0; k < nm; k++) {
@@ -681,15 +693,8 @@ export class Renderer {
         ctx.lineWidth = line(10);
         for (const f of [0.8, 0.72, 0.64]) { ctx.beginPath(); ctx.arc(X, Y, r * f, 0, TAU); ctx.stroke(); }
       }
-      ctx.strokeStyle = 'rgba(225,235,255,0.6)';
-      ctx.lineWidth = line(DIM.dna);
-      ctx.beginPath();
-      for (let k = 0; k < a.dna.length; k += 2) {
-        const x = X + a.dna[k] * r, y = Y + a.dna[k + 1] * r;
-        if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-      }
-      ctx.closePath();
-      ctx.stroke();
+      this.drawGenome(c, a.dna, c.x, c.y, r, c.dna ? 'dna' : 'rna');
+      this.drawInfection(c);
       return;
     }
     // Endoplasmic reticulum.
@@ -700,14 +705,7 @@ export class Renderer {
     const nr = 0.34 * r;
     ctx.fillStyle = 'rgba(40,25,70,0.85)';
     ctx.beginPath(); ctx.arc(X, Y, nr, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(180,150,230,0.55)';
-    ctx.lineWidth = line(DIM.dna * 4);
-    ctx.beginPath();
-    for (let k = 0; k < a.chrom.length; k += 2) {
-      const x = X + a.chrom[k] * nr, y = Y + a.chrom[k + 1] * nr;
-      if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-    }
-    ctx.stroke();
+    this.drawGenome(c, a.chrom, c.x, c.y, nr, 'chromatin');
     ctx.fillStyle = 'rgba(100,70,150,0.95)';
     ctx.beginPath(); ctx.arc(X + a.nuc.fx * nr, Y + a.nuc.fy * nr, nr * 0.3, 0, TAU); ctx.fill();
     const gap = DIM.nuclearGap * NM;
@@ -766,6 +764,140 @@ export class Renderer {
       }
       ctx.restore();
     }
+    this.drawInfection(c);
+  }
+
+  // Genetic material at every scale: a tangle from afar; a double helix with base pairs (DNA) or a
+  // single strand with bases (RNA genome) up close; chromatin wound on nucleosomes in eukaryotes.
+  drawGenome(c, pts, cx, cy, R, mode) {
+    const ctx = this.ctx, X = cx - this.cam.x, Y = cy - this.cam.y, pxnm = this.pxnm;
+    const w = mode === 'chromatin' ? 30 : DIM.dna;
+    const detailed = mode === 'chromatin' ? pxnm >= 0.4 : pxnm >= 2;
+    if (detailed && mode === 'chromatin') {
+      // Close up, chromatin is "beads on a string": thin linker DNA between nucleosomes.
+      ctx.strokeStyle = 'rgba(225,235,255,0.7)';
+      ctx.lineWidth = Math.max(DIM.dna * NM, 0.7 * this.px);
+      ctx.beginPath();
+      for (let k = 0; k < pts.length; k += 2) { const x = X + pts[k] * R, y = Y + pts[k + 1] * R; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+      ctx.stroke();
+    }
+    if (!detailed) {
+    ctx.strokeStyle = mode === 'rna' ? 'rgba(255,150,220,0.6)' : mode === 'chromatin' ? 'rgba(180,150,230,0.6)' : 'rgba(225,235,255,0.55)';
+    ctx.lineWidth = Math.max(w * NM, 0.7 * this.px);
+    ctx.beginPath();
+    for (let k = 0; k < pts.length; k += 2) {
+      const x = X + pts[k] * R, y = Y + pts[k + 1] * R;
+      if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    return;
+    }
+    // Close up: only the segments on screen get molecular detail.
+    for (let k = 0; k + 3 < pts.length; k += 2) {
+      const x1 = cx + pts[k] * R, y1 = cy + pts[k + 1] * R, x2 = cx + pts[k + 2] * R, y2 = cy + pts[k + 3] * R;
+      if (!this.inView((x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(x2 - x1, y2 - y1) / 2 + 30 * NM)) continue;
+      if (mode === 'chromatin') this.drawNucleosomes(x1, y1, x2, y2, c.id, k);
+      else this.drawHelix(x1, y1, x2, y2, c.id, k, mode === 'rna');
+    }
+  }
+
+  drawHelix(x1, y1, x2, y2, seed, seg, rna) {
+    const ctx = this.ctx, L = Math.hypot(x2 - x1, y2 - y1) / NM; // nm
+    if (L < 0.1) return;
+    const ux = (x2 - x1) / (L * NM), uy = (y2 - y1) / (L * NM);
+    ctx.save();
+    ctx.translate(x1 - this.cam.x, y1 - this.cam.y);
+    ctx.rotate(Math.atan2(uy, ux));
+    ctx.scale(NM, NM);
+    if (rna) {
+      // Single-stranded RNA genome: one backbone, bases sticking out.
+      ctx.strokeStyle = '#ff9de8'; ctx.lineWidth = 0.25;
+      ctx.beginPath();
+      for (let s = 0; s <= L; s += 0.3) { const y = Math.sin(s * 0.9) * 0.3; if (s) ctx.lineTo(s, y); else ctx.moveTo(s, y); }
+      ctx.stroke();
+      for (let k = 0, s = 0; s < L; k++, s += DIM.ntRise) {
+        ctx.fillStyle = MONO_COLORS[dnaBase(seed, seg, k)];
+        ctx.fillRect(s - 0.18, Math.sin(s * 0.9) * 0.3, 0.36, 0.9);
+      }
+    } else {
+      // B-DNA: two backbones winding round each other every 3.4 nm, base pairs every 0.34 nm.
+      const back = (ph) => { ctx.beginPath(); for (let s = 0; s <= L; s += 0.2) { const y = Math.sin((s / 3.4) * TAU + ph); if (s) ctx.lineTo(s, y); else ctx.moveTo(s, y); } ctx.stroke(); };
+      ctx.lineWidth = 0.08;
+      for (let k = 0, s = 0; s < L; k++, s += 0.34) {
+        const ya = Math.sin((s / 3.4) * TAU), yb = Math.sin((s / 3.4) * TAU + 2.4);
+        const b = dnaBase(seed, seg, k), pair = b === 0 ? 1 : b === 1 ? 0 : b === 2 ? 3 : 2, ym = (ya + yb) / 2;
+        ctx.strokeStyle = MONO_COLORS[b]; ctx.beginPath(); ctx.moveTo(s, ya); ctx.lineTo(s, ym); ctx.stroke();
+        ctx.strokeStyle = MONO_COLORS[pair]; ctx.beginPath(); ctx.moveTo(s, ym); ctx.lineTo(s, yb); ctx.stroke();
+      }
+      ctx.lineWidth = 0.3;
+      ctx.strokeStyle = '#f4a259'; back(0);
+      ctx.strokeStyle = '#e8e2d0'; back(2.4);
+    }
+    ctx.restore();
+  }
+
+  drawNucleosomes(x1, y1, x2, y2, seed, seg) {
+    // DNA wraps 1.65 turns round a histone core every ~200 base pairs (~11 nm beads on a string).
+    const ctx = this.ctx, L = Math.hypot(x2 - x1, y2 - y1) / NM, n = Math.max(1, Math.floor(L / 25));
+    ctx.fillStyle = 'rgba(205,180,255,0.9)';
+    ctx.strokeStyle = 'rgba(240,230,255,0.9)';
+    ctx.lineWidth = Math.max(2 * NM, 0.6 * this.px);
+    for (let k = 0; k < n; k++) {
+      const f = (k + 0.5) / n, x = x1 + (x2 - x1) * f - this.cam.x, y = y1 + (y2 - y1) * f - this.cam.y;
+      ctx.beginPath(); ctx.arc(x, y, 5.5 * NM, 0, TAU); ctx.fill();
+      if (this.pxnm >= 3) { ctx.beginPath(); ctx.arc(x, y, 5.9 * NM, 0.3, 0.3 + TAU * 0.82); ctx.stroke(); }
+    }
+  }
+
+  // New virus capsids piling up inside an infected cell until it bursts.
+  drawInfection(c) {
+    if (!c.infected) return;
+    const inf = c.infected, prog = Math.min(1, (this.time - inf.since) / Math.max(1, inf.t - inf.since));
+    const n = Math.floor(prog * 24), R = DIM.virus * NM, ctx = this.ctx;
+    if (R * this.ppu < 1) return;
+    const rng = new RNG((c.id * 31337) >>> 0);
+    ctx.fillStyle = 'rgba(200,240,110,0.85)';
+    for (let k = 0; k < n; k++) {
+      const a = rng.next() * TAU, rr = Math.sqrt(rng.next()) * 0.8 * c.r;
+      ctx.beginPath(); this.poly(c.x + Math.cos(a) * rr - this.cam.x, c.y + Math.sin(a) * rr - this.cam.y, R, 6, 0); ctx.fill();
+    }
+  }
+
+  drawViruses(world) {
+    const list = world.viruses && world.viruses.list;
+    if (!list || !list.length) return;
+    const ctx = this.ctx, R = DIM.virus * NM, cx = this.cam.x, cy = this.cam.y;
+    if (R * this.ppu < 1.5) {
+      ctx.fillStyle = '#d4ff6a';
+      const h = Math.max(R, 0.65 * this.px);
+      for (const v of list) if (this.inView(v.x, v.y, R * 4)) ctx.fillRect(v.x - cx - h, v.y - cy - h, 2 * h, 2 * h);
+      return;
+    }
+    for (const v of list) if (this.inView(v.x, v.y, R * 4)) this.drawVirus(v.x, v.y, v.ang);
+  }
+
+  // A tailed bacteriophage: icosahedral head (~100 nm), contractile tail, tail fibres.
+  drawVirus(x, y, ang) {
+    const ctx = this.ctx;
+    this.nmFrame(x, y, ang);
+    ctx.fillStyle = '#9fc04a';
+    ctx.fillRect(-9, 40, 18, 110);
+    ctx.strokeStyle = '#cfe98a'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(-34, 150); ctx.lineTo(34, 150); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (const s of [-1, 1]) for (const k of [0, 1, 2]) { const bx = s * (12 + k * 10); ctx.moveTo(bx, 150); ctx.lineTo(bx + s * 30, 190 - k * 8); ctx.lineTo(bx + s * 42, 215); }
+    ctx.stroke();
+    ctx.fillStyle = '#b9e05a'; ctx.strokeStyle = '#efffb0'; ctx.lineWidth = 4;
+    ctx.beginPath(); this.poly(0, 0, 50, 6, Math.PI / 6); ctx.fill(); ctx.stroke();
+    if (this.pxnm >= 0.25) {
+      // Packed genome inside the head.
+      ctx.strokeStyle = 'rgba(255,209,102,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let k = 0; k < 120; k++) { const a = k * 0.55, r = 4 + k * 0.28; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawBonds(cells) {

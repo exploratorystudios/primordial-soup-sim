@@ -293,6 +293,12 @@ export class Soup {
 
   stepVesicles() {
     const w = this.world, rng = w.rng, cur = this._cur;
+    // Grid of free polymers so each vesicle only checks the ones nearby.
+    const P = this.polymers, np = P.length;
+    if (!this.polyHash) { this.polyHash = new SpatialHash(CFG.W, CFG.H, 32); this.pxs = new Float32Array(1024); this.pys = new Float32Array(1024); }
+    if (this.pxs.length < np) { this.pxs = new Float32Array(np * 2); this.pys = new Float32Array(np * 2); }
+    for (let i = 0; i < np; i++) { this.pxs[i] = P[i].x; this.pys[i] = P[i].y; }
+    this.polyHash.build(np, this.pxs, this.pys);
     const mx = this.mx, my = this.my, mt = this.mt, md = this.mdead;
     const out = [];
     for (const v of this.vesicles) {
@@ -329,16 +335,16 @@ export class Soup {
 
       // Occasionally a free polymer gets trapped inside.
       if ((w.t + v.id) % 4 === 0) {
-        const r2 = v.r * v.r;
-        for (const p of this.polymers) {
-          if (p.dead) continue;
+        const r2 = v.r * v.r, P = this.polymers;
+        this.polyHash.query(v.x, v.y, v.r, (j) => {
+          const p = P[j];
+          if (p.dead) return;
           const dx = p.x - v.x, dy = p.y - v.y;
           if (dx * dx + dy * dy < r2 && rng.next() < 0.12) {
             p.dead = true;
-            const q = this.makePolymer(p.seq, v.x, v.y);
-            v.polys.push(q);
+            v.polys.push(this.makePolymer(p.seq, v.x, v.y));
           }
-        }
+        });
       }
 
       this.stepInternal(v);

@@ -13,8 +13,10 @@
       <div id="era-banner">
         <div id="era-name">Hadean Ocean</div>
         <div id="era-desc"></div>
+        <div id="era-earth"></div>
       </div>
       <div id="toast-area"></div>
+      <div id="tour-caption" hidden></div>
       <div id="hint">Scroll to zoom · drag to pan · click to select, click again inside to go deeper · Esc up a level · F follow · Space pause</div>
     </main>
 
@@ -34,6 +36,15 @@
         <div class="row">
           <label>Seed <input id="seed" type="number" value="1" min="1"></label>
           <button id="btn-new">New world</button>
+        </div>
+        <div class="row">
+          <button id="btn-seek" title="Run at full speed until the next milestone">⏭ Next milestone</button>
+          <button id="btn-tour" title="A guided camera tour of what lives in this world">Tour</button>
+        </div>
+        <div class="row">
+          <button id="btn-save" title="Download this world as a file">Save world</button>
+          <button id="btn-load" title="Resume a saved world">Load world</button>
+          <input id="file-load" type="file" accept=".gz,.json" hidden>
         </div>
       </section>
 
@@ -65,7 +76,7 @@
           <button data-fov="150" title="150 nm field: membrane bilayers">Membrane</button>
           <button data-fov="15" title="15 nm field: individual molecules">Molecule</button>
         </div>
-        <p class="muted small">Everything is drawn at true size (habitat 0.7 × 0.45 mm). Select something first and the preset zooms into it.</p>
+        <p class="muted small" id="scale-note">Everything is drawn at true size. Select something first and the preset zooms into it.</p>
       </section>
 
       <section class="events">

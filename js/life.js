@@ -43,14 +43,26 @@ export class Cell {
     this.px = 0; this.py = 0; this.fx = 0; this.fy = 0;
     this._s = 0; this._ds = 0;
     this.nut = 0;
+    this.infected = null;
+    this.x0 = x; this.y0 = y;
     decode(this);
   }
 }
 
 export function decode(c) {
   const g = c.g;
-  c.r = c.mito ? 4 + g[Gn.SIZE] * 9 : 2.5 + g[Gn.SIZE] * 5;
-  c.area = (c.r / 5) * (c.r / 5);
+  // Radius in world units (0.5 µm): prokaryotes 1–3.5 µm across, eukaryotes 6–30 µm.
+  c.r = c.mito ? 6 + g[Gn.SIZE] * 24 : 1 + g[Gn.SIZE] * 2.5;
+  c.area = (c.r / 2) * (c.r / 2);        // relative to a 2 µm bacterium (collision mass)
+  c.m = Math.pow(c.area, 0.75);          // metabolic size: Kleiber-like sublinear scaling
+  c.transl = g[Gn.TRANSL];
+  c.prot = 0.5 + 0.5 * c.transl;         // ribozyme metabolism is slow; proteins are far better catalysts
+  // The switch to DNA happened gradually (enzymes to make deoxyribonucleotides, then polymerases,
+  // then repair), so its benefits rise smoothly with the gene; above 0.5 the genome counts as DNA.
+  const dg = Math.min(1, Math.max(0, (g[Gn.DNAG] - 0.15) / 0.6));
+  c.dnaLevel = dg * dg * (3 - 2 * dg);
+  c.dna = g[Gn.DNAG] > 0.5;
+  c.resist = g[Gn.RESIST];
   const p = g[Gn.PHOTO], ch = g[Gn.CHEMO], h = g[Gn.HETERO], pr = g[Gn.PRED];
   const tot = p + ch + h + pr + 0.05;
   const eff = (x) => Math.pow(x / tot, CFG.SPECIALIZE);
@@ -60,7 +72,7 @@ export function decode(c) {
   c.armor = g[Gn.ARMOR];
   c.adh = g[Gn.ADHES];
   c.share = g[Gn.SHARE];
-  c.cap = CFG.CAP_K * c.area * (c.mito ? 2.2 : 1);
+  c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1);
   c.divFrac = 0.45 + 0.45 * g[Gn.DIVTH];
   c.lifespan = 800 + g[Gn.LIFESPAN] * 4000;
   c.colMax = 2 + Math.floor(g[Gn.COLMAX] * 60);
@@ -74,7 +86,7 @@ export function decode(c) {
   c.colR = Math.round((p * 70 + ch * 235 + h * 150 + pr * 240) / s);
   c.colG = Math.round((p * 210 + ch * 150 + h * 110 + pr * 60) / s);
   c.colB = Math.round((p * 90 + ch * 50 + h * 240 + pr * 70) / s);
-  c.nutNeed = c.area * CFG.NUT_PER_AREA * 2; // enough body material for two cells
+  c.nutNeed = c.m * CFG.NUT_PER_AREA * 2; // enough body material for two cells
   c.trophColor = `rgb(${c.colR},${c.colG},${c.colB})`;
   c.hueColor = `hsl(${Math.round(g[Gn.HUE] * 360)},75%,60%)`;
 }
@@ -100,9 +112,13 @@ export class Life {
     this.origins = 0;
     this.stamp = 0;
     this.births = 0;
-    this.deaths = { starved: 0, eaten: 0, aged: 0, oxygen: 0, virus: 0, impact: 0 };
+    this.deaths = { starved: 0, eaten: 0, aged: 0, oxygen: 0, virus: 0, crowding: 0, impact: 0 };
+    this.sexualBirths = 0;
+    this.maxR = 1;
     this.stats = { photo: 0, chemo: 0, hetero: 0, pred: 0, euk: 0, plastid: 0, aerobic: 0, inColonies: 0, multicellular: 0, complex: 0, largest: 0, maxGen: 0, speciesAlive: 0, multiSpecies: 0 };
   }
+
+  redecode(c) { decode(c); }
 
   makeCell(x, y, g, parent) {
     return new Cell(this.nextId++, x, y, g, parent);
@@ -139,11 +155,23 @@ export class Life {
     if (this.xs.length < n) { this.xs = new Float32Array(n * 2); this.ys = new Float32Array(n * 2); }
     for (let i = 0; i < n; i++) { this.xs[i] = cells[i].x; this.ys[i] = cells[i].y; }
     this.hash.build(n, this.xs, this.ys);
+    // Largest radius present (collision search range) and how much of each grid square is covered by cells.
+    let maxR = 1;
+    const cov = this.coverage || (this.coverage = new Float32Array(this.hash.nc));
+    cov.fill(0);
+    const sq = CFG.LIFE_HASH * CFG.LIFE_HASH;
+    for (let i = 0; i < n; i++) {
+      const c = cells[i];
+      if (c.r > maxR) maxR = c.r;
+      cov[this.hash.cellOf[i]] += Math.min(Math.PI * c.r * c.r, sq) / sq;
+    }
+    this.maxR = maxR;
 
     for (let i = 0; i < n; i++) if (!cells[i].dead) this.live(cells[i]);
     this.interact();
-    this.relax();
+    if (this.w.t % 2 === 0) this.relax();
     this.physics();
+    if (this.w.viruses) this.w.viruses.step(); // uses this tick's cell hash
 
     let anyDead = false;
     for (let i = 0; i < n; i++) if (cells[i].dead) { anyDead = true; break; }
@@ -157,9 +185,11 @@ export class Life {
   live(c) {
     const w = this.w, F = w.fields, rng = w.rng, g = c.g, tm = TM[c.type];
     c.age++;
-    const crowd = this.hash.countAt(c.x, c.y);
+    // Self-shading: light falls when neighbours cover much of the area around the cell.
+    const sq = CFG.LIFE_HASH * CFG.LIFE_HASH;
+    const shade = this.coverage[this.hash.cell(c.x, c.y)] - Math.min(Math.PI * c.r * c.r, sq) / sq;
     let light = w.lightAt(c.x, c.y);
-    if (crowd > 4) light /= 1 + (crowd - 4) * 0.2; // self-shading
+    if (shade > 0.35) light /= 1 + (shade - 0.35) * 3;
     const o2 = F.get(F.oxygen, c.x, c.y);
     const o2f = o2 > CFG.O2_REF ? 1 : o2 / CFG.O2_REF;
     const resp = 1 + c.aer * CFG.AERO_BONUS * o2f * (c.mito ? 2.5 : 1);
@@ -167,42 +197,46 @@ export class Life {
     let gain = 0;
     const ep = c.effP * tm[0];
     if (ep > 0) {
-      const gp = light * CFG.PHOTO_K * c.area * ep * (c.plastid ? 1.8 : 1);
+      const gp = light * CFG.PHOTO_K * c.m * ep * (c.plastid ? 1.8 : 1) * c.prot;
       gain += gp;
       // Oxygenic photosynthesis needs strong light; dim vent-light photosynthesis is anoxygenic.
       const sun = w.sunAt(c.y);
       F.add(F.oxygen, c.x, c.y, gp * CFG.O2_YIELD * Math.min(1, sun * 2));
     }
     const ec = c.effC * tm[1];
-    if (ec > 0) gain += F.take(F.chem, c.x, c.y, CFG.CHEMO_K * c.area * ec) * CFG.CHEMO_EFF;
+    if (ec > 0) gain += F.take(F.chem, c.x, c.y, CFG.CHEMO_K * c.m * ec) * CFG.CHEMO_EFF * c.prot;
     const eh = c.effH * tm[2];
-    if (eh > 0) gain += F.take(F.organic, c.x, c.y, CFG.HET_K * c.area * eh) * CFG.HET_EFF * resp;
+    if (eh > 0) gain += F.take(F.organic, c.x, c.y, CFG.HET_K * c.m * eh) * CFG.HET_EFF * resp * c.prot;
 
-    let cost = CFG.BASE_COST * c.area * (c.mito ? 1.25 : 1) * tm[6] * (1 + 0.25 * g[Gn.LIFESPAN])
-      + c.aer * CFG.AER_COST * c.area
-      + c.armor * tm[5] * CFG.ARM_COST * c.area
+    let cost = CFG.BASE_COST * c.m * (c.mito ? 1.25 : 1) * tm[6] * (1 + 0.25 * g[Gn.LIFESPAN])
+      + c.aer * CFG.AER_COST * c.m
+      + c.armor * tm[5] * CFG.ARM_COST * c.m
       + c.adh * CFG.ADH_COST
-      + (c.effP + c.effC + c.effH + c.effPred) * CFG.MACHINE_COST * c.area;
+      + (c.effP + c.effC + c.effH + c.effPred) * CFG.MACHINE_COST * c.m
+      + c.transl * CFG.RIBOSOME_COST * c.m      // building and running ribosomes
+      + c.resist * CFG.RESIST_COST * c.m        // antiviral defence
+      // RNA genomes break easily and need constant repair, worse once oxygen appears.
+      + (CFG.DNA_COST * c.dnaLevel + CFG.RNA_GENOME_COST * (1 - c.dnaLevel) * (1 + 2 * o2f)) * c.m;
+    if (c.infected) cost += CFG.BASE_COST * c.m; // the virus hijacks the cell's machinery
     // Oxygen is toxic to cells without antioxidant / aerobic machinery.
     const tox = o2f - 1.3 * c.aer - (g[Gn.PHOTO] > 0.4 ? 0.3 : 0);
     let toxCost = 0;
-    if (tox > 0) toxCost = tox * CFG.TOX * c.area;
+    if (tox > 0) toxCost = tox * CFG.TOX * c.m;
     c.energy += gain - cost - toxCost;
     if (c.energy > c.cap) c.energy = c.cap;
 
     this.steer(c, tm);
 
     // Building a body needs scarce nutrient: this is what really limits the biosphere.
-    if (c.nut < c.nutNeed) c.nut += F.take(F.nutrient, c.x, c.y, Math.min(c.nutNeed - c.nut, CFG.NUT_UPTAKE * c.area));
+    if (c.nut < c.nutNeed) c.nut += F.take(F.nutrient, c.x, c.y, Math.min(c.nutNeed - c.nut, CFG.NUT_UPTAKE * c.m));
 
     if (c.energy <= 0) { this.kill(c, toxCost > cost * 0.5 ? 'oxygen' : 'starved', false); return; }
     if (c.age > c.lifespan || rng.next() < 0.00003) { this.kill(c, 'aged', false); return; }
-    // "Kill the winner": phages spread fastest through dense mats of free-living cells.
-    let lysis = crowd > 10 && c.orgSize === 1 ? CFG.VIRAL_LYSIS * (crowd - 10) : 0;
-    // Near the population ceiling epidemics sweep the ocean, so births never stall.
+    // An infected cell bursts when the viruses inside it are ready.
+    if (c.infected && w.t >= c.infected.t) { if (w.viruses) w.viruses.lyse(c); this.kill(c, 'virus', false); return; }
+    // Safety valve near the CPU population ceiling, so births never stall.
     const fill = this.cells.length / CFG.MAX_CELLS;
-    if (fill > 0.85) lysis += (fill - 0.85) * 0.02;
-    if (lysis > 0 && rng.next() < lysis) { this.kill(c, 'virus', false); return; }
+    if (fill > 0.85 && rng.next() < (fill - 0.85) * 0.02) { this.kill(c, 'crowding', false); return; }
 
     // A germline cell full of energy buds off to found a new organism.
     if (c.type === T_GERM && c.bonds.length && c.orgSize >= 6 && c.energy > 0.7 * c.cap) {
@@ -221,7 +255,15 @@ export class Life {
     const mot = c.motil * tm[4];
     if (mot < 0.03) return;
     const w = this.w, F = w.fields, g = c.g, rng = w.rng;
-    if ((c.id + w.t) % 6 === 0) this.sense(c);
+    // Only lineages that react to prey or predators bother to look for them.
+    if ((c.id + w.t) % 6 === 0 && (Math.abs(g[Gn.W_PREY]) > 0.1 || Math.abs(g[Gn.W_FLEE]) > 0.1)) this.sense(c);
+    // Gradients change slowly: rethink the heading every third tick, swim every tick.
+    if ((c.id + w.t) % 3 !== 0 && c.dirX !== undefined) {
+      const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
+      c.vx += c.dirX * th; c.vy += c.dirY * th;
+      c.energy -= mot * CFG.MOT_COST * c.m;
+      return;
+    }
     let dx = 0, dy = 0;
     F.grad(F.chem, c.x, c.y, GR); dx += GR.x * g[Gn.W_CHEM]; dy += GR.y * g[Gn.W_CHEM];
     F.grad(F.organic, c.x, c.y, GR); dx += GR.x * g[Gn.W_ORG]; dy += GR.y * g[Gn.W_ORG];
@@ -233,10 +275,11 @@ export class Life {
     dx += Math.cos(c.heading) * 0.3;
     dy += Math.sin(c.heading) * 0.3;
     const m = Math.hypot(dx, dy) || 1;
-    const th = (mot * CFG.MOT_SPEED) / Math.sqrt(c.area);
-    c.vx += (dx / m) * th;
-    c.vy += (dy / m) * th;
-    c.energy -= mot * CFG.MOT_COST * c.area;
+    const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
+    c.dirX = dx / m; c.dirY = dy / m;
+    c.vx += c.dirX * th;
+    c.vy += c.dirY * th;
+    c.energy -= mot * CFG.MOT_COST * c.m;
   }
 
   sense(c) {
@@ -258,7 +301,21 @@ export class Life {
 
   divide(c) {
     const rng = this.w.rng;
-    const g = Gn.mutate(c.g, rng);
+    // Eukaryotes may reproduce sexually: recombine with a nearby mate of their own kind.
+    let base = c.g, sexual = false;
+    if (c.mito && rng.next() < c.g[Gn.SEX]) {
+      const mate = this.findMate(c);
+      if (mate) {
+        base = Gn.recombine(c.g, mate.g, rng);
+        sexual = true;
+        mate.energy -= mate.cap * CFG.SEX_COST;
+        c.energy -= c.cap * CFG.SEX_COST;
+        this.sexualBirths++;
+        this.w.milestone('sex', 'Sexual reproduction: two eukaryotes combine their genomes');
+      }
+    }
+    // DNA polymerases proofread; RNA copying is sloppy.
+    const g = Gn.mutate(base, rng, 1 - (1 - CFG.DNA_MUT) * c.dnaLevel);
     const ang = rng.next() * 6.283;
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const child = this.makeCell(c.x + ca * c.r * 0.6, c.y + sa * c.r * 0.6, g, c);
@@ -280,8 +337,22 @@ export class Life {
       child.orgSize = ++c.orgSize;
       child.type = c.type;
     }
+    child.sexual = sexual;
     this.newborns.push(child);
     this.births++;
+  }
+
+  findMate(c) {
+    let best = null, bd = Infinity;
+    const r = c.r * 3 + 10, sp = this.species.get(c.species);
+    this.hash.query(c.x, c.y, r, (j) => {
+      const o = this.cells[j];
+      if (o === c || o.dead || !o.mito || o.infected) return;
+      if (o.species !== c.species && !(sp && Gn.distance(o.g, sp.rep) < CFG.SPECIATE * 1.5)) return;
+      const d = Math.hypot(o.x - c.x, o.y - c.y);
+      if (d < bd && d < r) { bd = d; best = o; }
+    });
+    return best;
   }
 
   kill(c, cause, eaten) {
@@ -290,7 +361,7 @@ export class Life {
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
     if (!eaten) {
       const F = this.w.fields;
-      F.add(F.organic, c.x, c.y, (Math.max(0, c.energy) * 0.5 + c.area * 8) * CFG.DEATH_ORG);
+      F.add(F.organic, c.x, c.y, (Math.max(0, c.energy) * 0.5 + c.m * 8) * CFG.DEATH_ORG);
       F.add(F.nutrient, c.x, c.y, c.nut);
       c.nut = 0;
     }
@@ -299,7 +370,7 @@ export class Life {
 
   // Collisions, predation and horizontal gene transfer.
   interact() {
-    const cells = this.cells, n = cells.length, rng = this.w.rng, maxR = CFG.MAX_R;
+    const cells = this.cells, n = cells.length, rng = this.w.rng, maxR = this.maxR;
     for (let i = 0; i < n; i++) {
       const a = cells[i];
       if (a.dead) continue;
@@ -323,7 +394,7 @@ export class Life {
   // A colony behaves like one big body for engulfment purposes.
   // Extra position-only pass so densely packed cells don't interpenetrate (visible at true scale).
   relax() {
-    const cells = this.cells, n = cells.length, maxR = CFG.MAX_R;
+    const cells = this.cells, n = cells.length, maxR = this.maxR;
     for (let i = 0; i < n; i++) {
       const a = cells[i];
       if (a.dead) continue;
@@ -354,14 +425,15 @@ export class Life {
     const F = this.w.fields;
     const o2f = Math.min(1, F.get(F.oxygen, a.x, a.y) / CFG.O2_REF);
     const resp = 1 + a.aer * CFG.AERO_BONUS * o2f * (a.mito ? 2.5 : 1);
-    a.energy = Math.min(a.cap, a.energy + (Math.max(0, b.energy) * 0.6 + b.area * 6) * (0.6 + 0.4 * resp));
+    a.energy = Math.min(a.cap, a.energy + (Math.max(0, b.energy) * 0.6 + b.m * 6) * (0.6 + 0.4 * resp) * a.prot);
     this.w.milestone('predator', 'The first predator engulfs another cell');
     a.nut += b.nut;
     b.nut = 0;
     if (a.nut > a.nutNeed) { F.add(F.nutrient, a.x, a.y, a.nut - a.nutNeed); a.nut = a.nutNeed; }
 
     // Endosymbiosis: sometimes the meal survives inside its host.
-    if (!a.mito && b.aer > 0.5 && o2f > 0.15 && rng.next() < CFG.ENDO_P) {
+    // Only cells that already store their genome as DNA (and make proteins) can host one.
+    if (!a.mito && a.dna && a.transl > 0.5 && b.aer > 0.5 && o2f > 0.15 && rng.next() < CFG.ENDO_P) {
       a.mito = true;
       decode(a);
       a.species = this.newSpecies(a, a.species).id;
@@ -426,8 +498,9 @@ export class Life {
     for (const c of cells) {
       if (c.dead) continue;
       this.w.current(c.x, c.y, CUR);
-      c.vx += (rng.next() - 0.5) * 0.1 + CUR.x * 0.25;
-      c.vy += (rng.next() - 0.5) * 0.1 + CUR.y * 0.25 + this.w.plume(c.x, c.y) * 0.12;
+      // Microbes are carried by the water: currents and vent plumes move them passively.
+      c.vx += (rng.next() - 0.5) * 0.1 + CUR.x * CFG.CELL_DRIFT;
+      c.vy += (rng.next() - 0.5) * 0.1 + CUR.y * CFG.CELL_DRIFT + this.w.plume(c.x, c.y) * 0.3;
       c.x += c.vx; c.y += c.vy;
       c.vx *= damp; c.vy *= damp;
       if (c.x < c.r) { c.x = c.r; c.vx = Math.abs(c.vx) * 0.5; } else if (c.x > W - c.r) { c.x = W - c.r; c.vx = -Math.abs(c.vx) * 0.5; }
@@ -496,10 +569,15 @@ export class Life {
   census() {
     const st = this.stats, t = this.w.t;
     st.photosynthesizers = st.photo = st.chemo = st.hetero = st.pred = st.euk = st.plastid = st.aerobic = st.inColonies = 0;
+    st.dnaCells = st.proteinCells = st.infected = 0;
+    st.sexualBirths = this.sexualBirths;
     for (const s of this.species.values()) s.count = 0;
     for (const c of this.cells) {
       if (c.troph === 0) st.photo++; else if (c.troph === 1) st.chemo++; else if (c.troph === 2) st.hetero++; else st.pred++;
       if (c.effP > 0.15) st.photosynthesizers++;
+      if (c.dna) st.dnaCells++;
+      if (c.transl > 0.6) st.proteinCells++;
+      if (c.infected) st.infected++;
       if (c.mito) st.euk++;
       if (c.plastid) st.plastid++;
       if (c.aer > 0.5) st.aerobic++;

@@ -1,8 +1,11 @@
 // Entry point: main loop and input handling.
 import { World } from './world.js';
+import { CFG } from './config.js';
 import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
 import { fovFor, topLevelAt, childAt, contains, ancestors } from './parts.js';
+import { Tour } from './tour.js';
+import { saveToFile, loadFromFile } from './persist.js';
 
 const SPEEDS = [0.25, 1, 2, 5, 10, 20, 50, 100, 250]; // ticks per frame
 const $ = (id) => document.getElementById(id);
@@ -29,8 +32,10 @@ function setSpeed(i) {
   $('speed-val').textContent = s < 1 ? `${s}×/frame` : `${s}/frame`;
 }
 setSpeed(+params.get('speed') || speedIdx);
+$('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
 
 function newWorld(s) {
+  if (typeof tour !== 'undefined') tour.stop();
   seed = s;
   world = new World(seed);
   ui.reset();
@@ -38,17 +43,39 @@ function newWorld(s) {
   history.replaceState(null, '', `?seed=${seed}`);
 }
 
+let seeking = null; // { from: milestone count, start: tick } while jumping to the next milestone
+let lastNow = performance.now();
+const tour = new Tour(renderer, ui, () => $('btn-tour').classList.remove('active'));
+
 function loop() {
+  frameStep();
+  requestAnimationFrame(loop);
+}
+
+function frameStep() {
   frame++;
-  if (running) {
+  const now = performance.now(), dt = Math.min(0.1, (now - lastNow) / 1000);
+  lastNow = now;
+  if (seeking) {
+    // Full speed (within the frame budget) until something new happens.
+    const t0 = performance.now();
+    while (performance.now() - t0 < 40) {
+      world.step();
+      if (world.milestones.length > seeking.from || world.t - seeking.start > 400000) { stopSeek(); break; }
+    }
+    alpha = 1;
+    if (seeking) $('btn-seek').textContent = `⏭ Seeking… tick ${world.t.toLocaleString()}`;
+  } else if (running) {
     acc += SPEEDS[speedIdx];
     const t0 = performance.now();
     // Stay responsive: never spend more than ~30 ms simulating per frame.
     while (acc >= 1 && performance.now() - t0 < 30) { world.step(); acc--; }
     if (acc > 1) acc = 0;
     alpha = SPEEDS[speedIdx] >= 1 ? 1 : acc;
+    world.smooth = SPEEDS[speedIdx] < 1; // only pay for in-between frames when they're visible
   }
   // Draw everything partway between ticks (the simulation itself never sees these positions).
+  tour.update(dt);
   world.beginInterp(alpha);
   opts.time = world.t - 1 + alpha;
   const sel = ui.selected;
@@ -62,12 +89,50 @@ function loop() {
   renderer.draw(world, opts);
   ui.update(world, frame);
   world.endInterp();
-  requestAnimationFrame(loop);
 }
 
 // ---------------------------------------------------------------- controls
 $('btn-play').onclick = () => { running = !running; $('btn-play').textContent = running ? 'Pause' : 'Play'; };
 $('btn-step').onclick = () => { world.step(); alpha = 1; };
+
+function stopSeek() {
+  seeking = null;
+  $('btn-seek').textContent = '⏭ Next milestone';
+  $('btn-seek').classList.remove('active');
+}
+$('btn-seek').onclick = () => {
+  if (seeking) { stopSeek(); return; }
+  seeking = { from: world.milestones.length, start: world.t };
+  $('btn-seek').classList.add('active');
+};
+$('btn-tour').onclick = () => {
+  if (tour.active) { tour.stop(); return; }
+  $('btn-tour').classList.add('active');
+  tour.start(world);
+};
+$('btn-save').onclick = async () => {
+  const bytes = await saveToFile(world);
+  ui.toast(`World saved (${(bytes / 1e6).toFixed(1)} MB)`, world.t);
+};
+$('btn-load').onclick = () => $('file-load').click();
+$('file-load').onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const w = await loadFromFile(f);
+    tour.stop(); stopSeek();
+    world = w;
+    seed = w.seed;
+    $('seed').value = seed;
+    ui.reset();
+    ui.seenLogs = w.logs.length; // don't replay old notifications
+    history.replaceState(null, '', `?seed=${seed}`);
+    ui.toast(`Loaded seed ${seed} at tick ${w.t.toLocaleString()}`, w.t);
+  } catch (err) {
+    ui.toast(`Could not load: ${err.message}`, world.t);
+  }
+};
 $('btn-fit').onclick = () => { renderer.fit(); if (ui.selected) ui.selected.follow = false; };
 // Zoom presets: jump to a physical field of view, centred on the selection if there is one.
 for (const b of document.querySelectorAll('[data-fov]')) {
@@ -113,6 +178,7 @@ window.addEventListener('resize', () => renderer.resize());
 let drag = null;
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  tour.stop();
   const r = canvas.getBoundingClientRect();
   const f = Math.exp(-e.deltaY * 0.0015);
   // While following something, zoom straight into it.
@@ -129,6 +195,7 @@ canvas.addEventListener('pointermove', (e) => {
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   drag.moved += Math.abs(dx) + Math.abs(dy);
   if (drag.moved > 4) {
+    tour.stop();
     canvas.classList.add('dragging');
     renderer.pan(dx, dy);
     if (ui.selected) ui.selected.follow = false;
@@ -198,6 +265,6 @@ ui.onFollow = toggleFollow;
 function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT; }
 
 // Console handle for tinkering, e.g. soup.world.life.cells.length
-window.soup = { get world() { return world; }, renderer, ui, opts, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
+window.soup = { get world() { return world; }, renderer, ui, opts, tour, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
 
 requestAnimationFrame(loop);

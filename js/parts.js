@@ -3,7 +3,7 @@
 // camera can zoom into it. Sub-cellular parts are procedural: they follow the cell's simulated
 // state (eukaryote or not, plastids, size, armor, genome) but are not simulated one by one.
 import { BASES, LIPID } from './chemistry.js';
-import { NM_PER_UNIT, DIM, formatLen } from './render.js';
+import { NM_PER_UNIT, DIM, formatLen, dnaBase } from './render.js';
 import { TYPE_NAMES } from './life.js';
 import * as Gn from './genome.js';
 
@@ -218,16 +218,20 @@ function cellParts(s, world, renderer) {
 
   out.push(part('Cytoplasm', at(0.6, 0.3, c.r * 0.3), {
     title: 'Cytoplasm',
-    kv: [['Volume', `${volUm3.toFixed(1)} µm³`], ['Energy stored', `${c.energy.toFixed(1)} / ${c.cap.toFixed(0)}`], ['Nutrient', `${c.nut.toFixed(2)} / ${c.nutNeed.toFixed(2)}`]],
+    kv: [['Volume', `${volUm3.toFixed(1)} µm³`], ['Energy stored', `${c.energy.toFixed(1)} / ${c.cap.toFixed(0)}`], ['Nutrient', `${c.nut.toFixed(2)} / ${c.nutNeed.toFixed(2)}`],
+      ['Protein machinery', `${Math.round(c.transl * 100)}%`], ...(c.infected ? [['Infected by virus lineage', `#${c.infected.lineage}`]] : [])],
     desc: 'A crowded gel of water (~70%), proteins, RNA and metabolites, where the chemistry of life happens.',
   }, { parent: s }));
 
   // Genetic material.
-  const genome = part(c.mito ? 'Chromosomes (genome)' : 'Chromosome (nucleoid)', at(c.mito ? a.nuc.fx * 0.34 : 0, c.mito ? a.nuc.fy * 0.34 : 0, c.r * (c.mito ? 0.25 : 0.4)), {
-    title: c.mito ? 'Linear chromosomes in the nucleus' : 'Circular chromosome (nucleoid)',
-    kv: [['DNA width', '2 nm'], ['Simulated genes', String(Gn.NG)], ['Generation', String(c.gen)], ['Mutation rate gene', c.g[Gn.MUTR].toFixed(2)]],
-    desc: 'The double-stranded DNA genome. Its genes set every trait below; each division copies it with occasional mutations.',
-  }, { parent: s });
+  const genome = part(c.mito ? 'Chromosomes (genome)' : c.dna ? 'Chromosome (nucleoid)' : 'RNA genome', at(c.mito ? a.nuc.fx * 0.34 : 0, c.mito ? a.nuc.fy * 0.34 : 0, c.r * (c.mito ? 0.25 : 0.46)), {
+    title: c.mito ? 'Chromatin: DNA wound on nucleosomes' : c.dna ? 'Circular DNA chromosome (nucleoid)' : 'RNA genome (RNA-world cell)',
+    kv: [['Genome', c.dna ? 'DNA, double-stranded, proofread' : 'RNA, single-stranded, error-prone'], ['Width', c.mito ? '30 nm fibre / 11 nm nucleosomes' : c.dna ? '2 nm' : '≈ 1 nm'],
+      ['Simulated genes', String(Gn.NG)], ['Generation', String(c.gen)], ['Mutation rate gene', c.g[Gn.MUTR].toFixed(2)]],
+    desc: c.dna
+      ? 'The genome, stored as DNA. Its genes set every trait of the cell; each division copies it, with occasional mutations. Real chromosomes are hundreds of times longer than the cell; this tangle is scaled down.'
+      : 'This early cell still keeps its genes in RNA, a leftover of the RNA world. RNA is fragile and copied sloppily; lineages that switch to DNA mutate less.',
+  }, { parent: s, genomeOf: c });
   genome.kids = () => geneGroups(c, genome);
 
   if (c.mito) {
@@ -445,6 +449,63 @@ function organismInfo(s, world) {
   };
 }
 
+// ------------------------------------------------------------------ viruses
+function virusParts(s) {
+  const v = s.obj, dead = () => !!v.dead;
+  const at = (lx, ly, r) => anchored(() => inFrame({ x: v.x, y: v.y, ang: v.ang }, lx, ly), r * NM, dead);
+  return [
+    part('Capsid (protein shell)', at(0, 0, 50), { title: 'Icosahedral capsid', kv: [['Diameter', '≈ 100 nm'], ['Made of', 'hundreds of copies of a few proteins']], desc: 'A geometric protein shell that protects the viral genome outside a host.' }, { parent: s }),
+    part('Viral genome', at(0, 0, 30), { title: 'Packed viral genome', kv: [['Size', 'tens of kilobases'], ...(v.cargo ? [['Carrying host gene', Gn.GENE_NAMES[v.cargo.i] || `#${v.cargo.i}`]] : [])], desc: 'Just enough genes to make more viruses. Sometimes it carries a stolen host gene into the next host.' }, { parent: s }),
+    part('Tail', at(0, 100, 50), { title: 'Contractile tail', kv: [['Length', '≈ 110 nm']], desc: 'Contracts like a syringe to inject the genome through the host’s envelope.' }, { parent: s }),
+    part('Tail fibres', at(0, 190, 35), { title: 'Tail fibres (receptor-binding proteins)', kv: [['Binding key', `${v.k1.toFixed(2)} / ${v.k2.toFixed(2)}`]], desc: 'They grab the host only if its surface receptors have the matching shape. Hosts escape by mutating their receptors; viruses follow.' }, { parent: s }),
+  ];
+}
+
+function virusInfo(s) {
+  const v = s.obj;
+  return {
+    title: `Virus (phage) · lineage #${v.lineage}`,
+    kv: [['Size', '≈ 100 nm head, 200 nm tail'], ['Binding key', `${v.k1.toFixed(2)} / ${v.k2.toFixed(2)}`], ['Age', `${v.age} ticks`], ['Carries host gene', v.cargo ? (Gn.GENE_NAMES[v.cargo.i] || `#${v.cargo.i}`) : 'no']],
+    desc: 'Not alive on its own: a packaged genome that drifts until it meets a cell with matching receptors, takes it over, and bursts it to release ~10–40 copies.',
+  };
+}
+
+// A base pair in a drawn chromosome near point p (only when the double helix is visible).
+function basePairAt(gs, p, tol, renderer) {
+  const c = gs.genomeOf, a = renderer.anatomy(c);
+  const euk = c.mito, pts = euk ? a.chrom : a.dna, R = euk ? c.r * 0.34 : c.r;
+  let best = null, bd = Infinity;
+  for (let k = 0; k + 3 < pts.length; k += 2) {
+    const x1 = c.x + pts[k] * R, y1 = c.y + pts[k + 1] * R, x2 = c.x + pts[k + 2] * R, y2 = c.y + pts[k + 3] * R;
+    const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy || 1e-12;
+    const f = Math.max(0, Math.min(1, ((p.x - x1) * dx + (p.y - y1) * dy) / L2));
+    const d = Math.hypot(x1 + dx * f - p.x, y1 + dy * f - p.y);
+    if (d < bd) { bd = d; best = { k, f, L: Math.sqrt(L2) / NM, x: x1 + dx * f, y: y1 + dy * f }; }
+  }
+  if (!best || bd > 2 * NM + tol) return null;
+  const NAMES = ['A', c.dna ? 'T' : 'U', 'G', 'C'];
+  const FULL = ['Adenine', c.dna ? 'Thymine' : 'Uracil', 'Guanine', 'Cytosine'];
+  const spacing = c.dna ? 0.34 : DIM.ntRise, i = Math.round((best.f * best.L) / spacing);
+  const b = dnaBase(c.id, best.k, i);
+  const pos = { x: best.x, y: best.y };
+  const dead = () => c.dead;
+  if (!c.dna) {
+    return part(`RNA base ${NAMES[b]}`, anchored(() => pos, 0.6 * NM, dead), { title: `${FULL[b]} in the RNA genome`, kv: [['Rise', '0.59 nm per base']], desc: 'A single strand: there is no partner to check copying errors against.' }, { parent: gs });
+  }
+  const pair = b === 0 ? 1 : b === 1 ? 0 : b === 2 ? 3 : 2;
+  const bp = part(`Base pair ${NAMES[b]}–${NAMES[pair]}`, anchored(() => pos, 1 * NM, dead), {
+    title: `DNA base pair ${NAMES[b]}–${NAMES[pair]}`,
+    kv: [['Hydrogen bonds', b >= 2 ? '3 (G–C)' : '2 (A–T)'], ['Rise', '0.34 nm per base pair'], ['Helix', '10.5 bp per turn, 2 nm wide']],
+    desc: 'One rung of the double helix. Each strand is a template for the other, so errors can be detected and repaired.',
+  }, { parent: gs });
+  bp.kids = () => [
+    part(`${FULL[b]} (strand 1)`, anchored(() => pos, 0.5 * NM, dead), { title: FULL[b], kv: [['Type', b === 0 || b === 2 ? 'purine' : 'pyrimidine']], desc: 'Read by the cell three bases at a time.' }, { parent: bp }),
+    part(`${FULL[pair]} (strand 2)`, anchored(() => pos, 0.5 * NM, dead), { title: FULL[pair], kv: [['Type', pair === 0 || pair === 2 ? 'purine' : 'pyrimidine']], desc: 'The complementary partner on the opposite strand.' }, { parent: bp }),
+    part('Deoxyribose–phosphate backbone', anchored(() => pos, 0.9 * NM, dead), { title: 'Sugar–phosphate backbone', kv: [['Sugar', 'deoxyribose (no 2′-OH)']], desc: 'Missing one oxygen compared with RNA’s ribose, which makes DNA far more chemically stable.' }, { parent: bp }),
+  ];
+  return bp;
+}
+
 // ------------------------------------------------------------- public API
 export function children(s, world, renderer) {
   if (s.gone) return [];
@@ -454,6 +515,7 @@ export function children(s, world, renderer) {
     case 'vesicle': return vesicleParts(s, renderer);
     case 'polymer': return polymerParts(s, renderer);
     case 'molecule': return moleculeParts(s);
+    case 'virus': return virusParts(s);
     case 'part': return s.kids ? s.kids() : [];
   }
   return [];
@@ -463,6 +525,7 @@ export function info(s, world) {
   if (s.kind === 'part') return s.info;
   if (s.kind === 'molecule') return moleculeInfo(s);
   if (s.kind === 'organism') return organismInfo(s, world);
+  if (s.kind === 'virus') return virusInfo(s);
   return null;
 }
 
@@ -481,6 +544,7 @@ export function crumbLabel(s) {
   if (s.kind === 'cell') return `Cell #${s.obj.id}`;
   if (s.kind === 'vesicle') return s.obj.polys.some((p) => p.act > 0) ? 'Protocell' : 'Vesicle';
   if (s.kind === 'polymer') return `RNA ${s.obj.seq.length} nt`;
+  if (s.kind === 'virus') return `Virus #${s.obj.id}`;
   return s.kind;
 }
 
@@ -516,7 +580,7 @@ export function topLevelAt(world, p, tol, showChem) {
   }
   if (world.viruses) {
     for (const v of world.viruses.list) {
-      if (Math.hypot(v.x - p.x, v.y - p.y) <= DIM.virus * NM + tol) cands.push(sel('virus', Object.assign(v, { r: DIM.virus * NM })));
+      if (Math.hypot(v.x - p.x, v.y - p.y) <= DIM.virus * NM * 2 + tol) cands.push(sel('virus', Object.assign(v, { r: DIM.virus * NM * 2 }), { world }));
     }
   }
   if (showChem) {
@@ -608,6 +672,10 @@ export function childAt(s, p, tol, world, renderer) {
       const d = Math.hypot(p.x - c.x, p.y - c.y);
       if (Math.abs(d - nr) < (DIM.nuclearGap + 20) * NM + tol) return out(kids[0]);
       return out(smallestHit([kids[1]], p, tol) || kids[2]);
+    }
+    if (s.genomeOf) {
+      const pxOK = s.genomeOf.mito ? renderer.ppu / NM_PER_UNIT >= 0.4 : renderer.ppu / NM_PER_UNIT >= 2;
+      return pxOK ? out(basePairAt(s, p, tol, renderer)) : null;
     }
     return out(smallestHit(s.kids ? flatten(s.kids()) : [], p, tol, s.obj.r || Infinity));
   }

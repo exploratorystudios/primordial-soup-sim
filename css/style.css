@@ -146,3 +146,13 @@ button.wide { width: 100%; margin-top: 8px; }
 
 .crumbs .follow { float: right; padding: 2px 8px; font-size: 11px; margin-left: 6px; }
 .crumbs .follow.on { border-color: var(--accent); color: var(--accent); }
+
+#era-earth { color: var(--accent-2); font-size: 12px; margin-top: 2px; }
+#tour-caption {
+  position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); max-width: 720px;
+  background: rgba(4, 8, 15, 0.82); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px;
+  font-size: 15px; text-align: center; pointer-events: none;
+}
+#tour-caption b { display: block; font-size: 17px; margin-bottom: 2px; }
+#tour-caption[hidden] { display: none; }
+button.active { border-color: var(--accent-2); color: var(--accent-2); }

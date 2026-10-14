@@ -194,7 +194,7 @@ export class Cinema {
 
   update(id, u, lf, n) {
     const w = this.world, s = this.s, R = this.renderer;
-    const habitat = () => this.setCam(CFG.W / 2, 500, HABITAT_FOV);
+    const habitat = () => this.setCam(CFG.W / 2, CFG.H / 2, HABITAT_FOV);
     switch (id) {
       case 'title':
         habitat();
@@ -204,7 +204,7 @@ export class Cinema {
         this.step(1);
         const v = this.mainVent();
         s.target = { x: v.x, y: CFG.H - 70 };
-        this.dive({ x: CFG.W / 2, y: 500 }, s.target, HABITAT_FOV, 150000, seg(u, 0.15, 1));
+        this.dive({ x: CFG.W / 2, y: CFG.H / 2 }, s.target, HABITAT_FOV, 150000, seg(u, 0.15, 1));
         break;
       }
       case 'molecules': {
@@ -247,7 +247,7 @@ export class Cinema {
         const target = Math.round(s.t0 + (s.t1 - s.t0) * seg(u, 0.05, 1));
         this.runTo(target);
         const fov = u < 0.08 ? logLerp(R.fieldWidthNm(), HABITAT_FOV, ease(seg(u, 0, 0.08))) : HABITAT_FOV;
-        this.setCam(CFG.W / 2 + (R.cam.x - CFG.W / 2) * (1 - ease(seg(u, 0, 0.08))), 470, fov);
+        this.setCam(CFG.W / 2 + (R.cam.x - CFG.W / 2) * (1 - ease(seg(u, 0, 0.08))), CFG.H / 2, fov);
         if (this.world.mset.has('goe') && u > 0.55) this.opts.overlay = u > 0.6 ? 'oxygen' : 'none';
         break;
       }
@@ -262,7 +262,7 @@ export class Cinema {
       case 'multicell': {
         if (u < 0.2) {
           this.runTo(Math.round(s.t0 + (s.t1 - s.t0) * seg(u, 0, 0.19)));
-          this.setCam(CFG.W / 2, 470, logLerp(R.fieldWidthNm(), HABITAT_FOV, ease(seg(u, 0, 0.05))));
+          this.setCam(CFG.W / 2, CFG.H / 2, logLerp(R.fieldWidthNm(), HABITAT_FOV, ease(seg(u, 0, 0.05))));
           break;
         }
         this.step(1);
@@ -274,7 +274,7 @@ export class Cinema {
         this.opts.colorMode = 'type';
         this.opts.focusOrg = s.org ? s.org.id : 0;
         const cells = s.org ? this.orgCells(s.org.id) : [];
-        if (!cells.length) { this.setCam(CFG.W / 2, 470, HABITAT_FOV); break; }
+        if (!cells.length) { this.setCam(CFG.W / 2, CFG.H / 2, HABITAT_FOV); break; }
         const cx = cells.reduce((a, c) => a + c.x, 0) / cells.length, cy = cells.reduce((a, c) => a + c.y, 0) / cells.length;
         const span = Math.max(...cells.map((c) => Math.hypot(c.x - cx, c.y - cy) + c.r)) * 2;
         s.center = { x: cx, y: cy };
@@ -287,7 +287,7 @@ export class Cinema {
         this.step(3);
         this.opts.colorMode = 'troph';
         const k = ease(seg(u, 0, 0.25));
-        this.setCam(s.from.x + (CFG.W / 2 - s.from.x) * k, s.from.y + (470 - s.from.y) * k, logLerp(s.from.fov, HABITAT_FOV, k));
+        this.setCam(s.from.x + (CFG.W / 2 - s.from.x) * k, s.from.y + (CFG.H / 2 - s.from.y) * k, logLerp(s.from.fov, HABITAT_FOV, k));
         break;
       }
     }

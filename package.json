@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "headless": "node headless.js"
+    "headless": "node headless.js",
+    "check": "node check-evolution.mjs",
+    "video": "node render-video.mjs --seed 21"
   }
 }
