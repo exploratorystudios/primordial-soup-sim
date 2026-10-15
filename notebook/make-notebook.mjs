@@ -66,22 +66,21 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # The population cap (for CPU) is now 12,000: worlds kept filling the 6,000 cap, whose safety valve culls cells at
-    # random. The nutrient cuts (75% supply, 8x burial in oxygen) kept worlds below the cap but starved eukaryotes
-    # (peak population 26 -> 5 in euk2), so test the bigger cap with the nutrient settings both ways. Kin recognition
-    # (KIN_SPARE: predators spare their own species unless starving) is now a default; one setting turns it off.
-    # Also new by default: viruses infect only their own domain (bacteria or eukaryotes), with rare host jumps.
-    "cap6k_old_nut":  {"MAX_CELLS": 6000, "VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
-    "cap12k_old_nut": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
-    "cap12k_old_nut_kin_off": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1, "KIN_SPARE": 0},  # eats own kin
-    "cap12k":         {},                               # today's defaults
+    # The cap is back at 6,000 (12,000 made late-game ticks ~45 ms in the browser). When crowded, a safety valve
+    # culls cells; it now removes the weakest first (drained energy reserve, near old age, or infected) at the same
+    # overall rate (CULL_SELECTIVE). Tested both ways, with the nutrient settings both ways (the nutrient cuts kept
+    # worlds under the cap but starved eukaryotes in euk2).
+    "random_old_nut": {"CULL_SELECTIVE": False, "VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
+    "select_old_nut": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
+    "random":         {"CULL_SELECTIVE": False},
+    "select":         {},                               # today's defaults
 }
 TICKS = 80_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = 28     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 8001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+FIRST_SEED = 9001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "cap2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "cull1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
@@ -133,7 +132,7 @@ def free_gb():
     return avail
 
 cores, mem = usable_cores(), free_gb()
-GB_PER_WORLD = 1.2        # a late-game world with ~12,000 cells peaks around this
+GB_PER_WORLD = 0.7        # a late-game world with ~6,000 cells peaks around this
 if WORKERS is None:
     WORKERS = max(1, min(cores, int(mem / GB_PER_WORLD)))
 if SEEDS_PER_CONFIG is None:

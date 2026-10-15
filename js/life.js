@@ -186,6 +186,12 @@ export class Life {
     }
     this.maxR = maxR;
 
+    // Crowding cull weights: mean weakness² this tick, so selective culling keeps the overall rate unchanged.
+    if (CFG.CULL_SELECTIVE && n > CFG.MAX_CELLS * 0.85) {
+      let sw = 0;
+      for (let i = 0; i < n; i++) { const w = this.weakness(cells[i]); sw += w * w; }
+      this.meanWeak = sw / n || 1;
+    }
     for (let i = 0; i < n; i++) if (!cells[i].dead) this.live(cells[i]);
     this.interact();
     if (this.w.t % 2 === 0) this.relax();
@@ -199,6 +205,15 @@ export class Life {
     this.newborns = [];
 
     if (this.w.t % 10 === 0) this.updateOrganisms();
+  }
+
+  // How close a cell is to death: drained energy, old age, or an infection that will burst it (0 healthy … 1).
+  // Energy is measured against a standard tank for the cell's size (how long it would last), so eukaryotes'
+  // larger tanks (2.2x) don't make healthy ones look half-empty.
+  weakness(c) {
+    if (c.infected) return 1;
+    const e = 1 - c.energy / (CFG.CAP_K * c.m), a = c.age / c.lifespan;
+    return Math.min(1, Math.max(0, e > a ? e : a));
   }
 
   // Apply a new radius and everything that scales with it.
@@ -270,7 +285,11 @@ export class Life {
     if (c.infected && w.t >= c.infected.t) { if (w.viruses) w.viruses.lyse(c); this.kill(c, 'virus', false); return; }
     // Safety valve near the CPU population ceiling, so births never stall.
     const fill = this.cells.length / CFG.MAX_CELLS;
-    if (fill > 0.85 && rng.next() < (fill - 0.85) * 0.02) { this.kill(c, 'crowding', false); return; }
+    if (fill > 0.85) {
+      let p = (fill - 0.85) * 0.02;
+      if (CFG.CULL_SELECTIVE) { const wk = this.weakness(c); p *= (wk * wk) / this.meanWeak; } // the weakest go first
+      if (rng.next() < p) { this.kill(c, 'crowding', false); return; }
+    }
 
     // A germline cell full of energy buds off to found a new organism.
     if (c.type === T_GERM && c.bonds.length && c.orgSize >= 6 && c.energy > 0.7 * c.cap) {
