@@ -87,6 +87,8 @@ export const CFG = {
   SHARE_INIT: 0.2,         // founders' energy-sharing gene starts in [0, this)
   SHIELD: false,           // predators and viruses reach only a colony's exposed cells (inner cells are shielded)
   SHIELD_BONDS: 3,         // a cell bonded to at least this many neighbours counts as inner
+  FRAGMENT: false,         // a colony that reaches its size limit splits into two halves that keep their cells,
+                           // bonds and jobs (like snowflake yeast and filamentous cyanobacteria)
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,

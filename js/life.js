@@ -125,6 +125,7 @@ export class Life {
     this.organisms = [];
     this.origins = 0;
     this.stamp = 0;
+    this.fragments = 0; // colonies that split in two (FRAGMENT)
     this.births = 0;
     this.deaths = { starved: 0, eaten: 0, aged: 0, oxygen: 0, virus: 0, crowding: 0, impact: 0 };
     this.sexualBirths = 0;
@@ -686,8 +687,9 @@ export class Life {
 
   // Find connected colonies, compute positional information and let each cell's
   // gene-regulatory network choose its fate.
-  updateOrganisms() {
+  updateOrganisms(again = false) {
     const cells = this.cells, w = this.w;
+    let split = false;
     const stamp = ++this.stamp;
     const orgs = [];
     const q = [];
@@ -703,6 +705,8 @@ export class Life {
         for (const o of x.bonds) if (o._s !== stamp) { o._s = stamp; q.push(o); }
       }
       const comp = q.slice();
+      // Reproduction by fragmentation: a colony that can grow no further splits in two.
+      if (CFG.FRAGMENT && !again && comp.length >= 4 && comp.length >= this.fragLimit(root)) { this.fragment(comp, root); split = true; }
       root._ds = stamp; root.depth = 0;
       const q2 = [root];
       for (let k = 0; k < q2.length; k++) {
@@ -728,6 +732,33 @@ export class Life {
     }
     orgs.sort((a, b) => b.size - a.size);
     this.organisms = orgs;
+    if (split) this.updateOrganisms(true); // (the halves are colonies of their own)
+  }
+
+  // How big this colony may grow: its colony-size gene, and with REALISTIC_MULTI the oxygen-limited body size.
+  fragLimit(root) {
+    return CFG.REALISTIC_MULTI ? Math.min(root.colMax, this.bodyLimit(root)) : root.colMax;
+  }
+
+  // Split a colony into two connected halves, grown outward from its founder and from the cell farthest from it.
+  fragment(comp, root) {
+    const st = ++this.stamp;
+    root._ds = st;
+    const order = [root];
+    for (let k = 0; k < order.length; k++) for (const o of order[k].bonds) if (o._ds !== st) { o._ds = st; order.push(o); }
+    const side = new Map(), qa = [root], qb = [order[order.length - 1]];
+    side.set(qa[0], 0); side.set(qb[0], 1);
+    for (let ia = 0, ib = 0; ia < qa.length || ib < qb.length;) {
+      for (const [qq, s, k] of [[qa, 0, ia], [qb, 1, ib]]) {
+        if (k >= qq.length) continue;
+        for (const o of qq[k].bonds) if (!side.has(o)) { side.set(o, s); qq.push(o); }
+      }
+      ia++; ib++;
+    }
+    const cut = [];
+    for (const c of comp) for (const o of c.bonds) if (side.get(c) === 0 && side.get(o) === 1) cut.push(c, o);
+    for (let i = 0; i < cut.length; i += 2) unlink(cut[i], cut[i + 1]);
+    this.fragments++;
   }
 
   // Largest body oxygen allows here: diffusion supplies a big body's inner cells only when oxygen is plentiful.
