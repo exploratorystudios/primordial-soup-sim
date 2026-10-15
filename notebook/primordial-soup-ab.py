@@ -12,13 +12,14 @@ CONFIGS = {
     # 2) REALISTIC_MULTI, multicellularity as on Earth: bacteria still make colonies and simple multicellular
     #    organisms (no mouth or germline cells), complex organisms are eukaryotic, and bodies above 16 cells
     #    need local oxygen (up to 62 cells when fully oxygenated).
-    "baseline":   {},
+    # (No baseline here: the current default already has 54 worlds in results-pool4.jsonl, "new_default",
+    # and the code is unchanged for it; merge those in for the comparison.)
     "o2_x3":      {"OXY_DECAY": 0.0005},
     "o2_x3_real": {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True},
     "o2_x2_real": {"OXY_DECAY": 0.00075, "REALISTIC_MULTI": True},
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
-SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
+SEEDS_PER_CONFIG = 26     # None: chosen from the number of cores (one full wave)
 FIRST_SEED = 1001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
