@@ -50,32 +50,39 @@ export class Viruses {
       v.ang += (rng.next() - 0.5) * 0.3;
       let used = false;
       if (cells.length && (v.id + w.t) % 2 === 0) {
-        L.hash.query(v.x, v.y, L.maxR + 1, (j) => {
-          const c = cells[j];
-          if (!c || c.dead || c.infected) return false;
-          const dx = c.x - v.x, dy = c.y - v.y;
-          if (dx * dx + dy * dy > (c.r + 0.1) * (c.r + 0.1)) return false;
-          // Binding: the virus's key must fit the cell's receptor shape.
-          const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
-          const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);
-          if (rng.next() > CFG.VIRUS_INFECT * fit * (1 - 0.9 * c.resist)) return false;
-          used = true;
-          v.next = c;
-          if (v.cargo && rng.next() < CFG.TRANSDUCE) {
-            v.nextWhy = `slipped a gene into cell #${c.id}`;
-            // Transduction: the virus delivers a gene from its last host instead of taking over.
-            c.g = new Float32Array(c.g);
-            c.g[v.cargo.i] = v.cargo.v;
-            this.stats.transductions++;
-            w.life.redecode(c);
-          } else {
-            v.nextWhy = `injected its genome into cell #${c.id}`;
-            w.emit('inject', 40, { cell: c, v, x: v.x, y: v.y });
-            c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
-            this.stats.infections++;
+        // (The spatial-hash walk is inlined: thousands of particles search every tick.)
+        const h = L.hash, st = h.start, items = h.items, gw = h.gw;
+        h.box(v.x, v.y, L.maxR + 1);
+        scan: for (let cy = h.y0; cy <= h.y1; cy++) {
+          for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
+            for (let k = st[g], e = st[g + 1]; k < e; k++) {
+              const c = cells[items[k]];
+              if (!c || c.dead || c.infected) continue;
+              const dx = c.x - v.x, dy = c.y - v.y;
+              if (dx * dx + dy * dy > (c.r + 0.1) * (c.r + 0.1)) continue;
+              // Binding: the virus's key must fit the cell's receptor shape.
+              const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
+              const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);
+              if (rng.next() > CFG.VIRUS_INFECT * fit * (1 - 0.9 * c.resist)) continue;
+              used = true;
+              v.next = c;
+              if (v.cargo && rng.next() < CFG.TRANSDUCE) {
+                v.nextWhy = `slipped a gene into cell #${c.id}`;
+                // Transduction: the virus delivers a gene from its last host instead of taking over.
+                c.g = new Float32Array(c.g);
+                c.g[v.cargo.i] = v.cargo.v;
+                this.stats.transductions++;
+                w.life.redecode(c);
+              } else {
+                v.nextWhy = `injected its genome into cell #${c.id}`;
+                w.emit('inject', 40, { cell: c, v, x: v.x, y: v.y });
+                c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
+                this.stats.infections++;
+              }
+              break scan;
+            }
           }
-          return true;
-        });
+        }
       }
       if (!used) out.push(v); else v.dead = true;
     }

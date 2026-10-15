@@ -162,6 +162,18 @@ export class Life {
     if (this.xs.length < n) { this.xs = new Float32Array(n * 2); this.ys = new Float32Array(n * 2); }
     for (let i = 0; i < n; i++) { this.xs[i] = cells[i].x; this.ys[i] = cells[i].y; }
     this.hash.build(n, this.xs, this.ys);
+    // A second grid holding only the predators: most cells can't hunt, so when they look around the only
+    // thing they can react to is a predator, and scanning just those finds exactly the same ones.
+    if (!this.predHash) { this.predHash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH); this.pxs = new Float32Array(256); this.pys = new Float32Array(256); this.pidx = new Int32Array(256); }
+    let np = 0;
+    for (let i = 0; i < n; i++) {
+      const c = cells[i];
+      if (c.effPred > 0.05) {
+        if (np === this.pidx.length) { const grow = (A, T) => { const B = new T(A.length * 2); B.set(A); return B; }; this.pxs = grow(this.pxs, Float32Array); this.pys = grow(this.pys, Float32Array); this.pidx = grow(this.pidx, Int32Array); }
+        this.pxs[np] = this.xs[i]; this.pys[np] = this.ys[i]; this.pidx[np++] = i;
+      }
+    }
+    this.predHash.build(np, this.pxs, this.pys);
     // Largest radius present (collision search range) and how much of each grid square is covered by cells.
     let maxR = 1;
     const cov = this.coverage || (this.coverage = new Float32Array(this.hash.nc));
@@ -309,7 +321,10 @@ export class Life {
     const cells = this.cells, s2 = c.sense * c.sense;
     const hunts = c.effPred > 0.05;
     let bp = 1e9, bf = 1e9;
-    this.hash.query(c.x, c.y, c.sense, (j) => {
+    // Non-hunters only react to predators: walk the predator grid (same cells, same order, same result).
+    const grid = hunts ? this.hash : this.predHash, idx = hunts ? null : this.pidx;
+    grid.query(c.x, c.y, c.sense, (k) => {
+      const j = idx ? idx[k] : k;
       const o = cells[j];
       if (o === c || o.dead || o.org === c.org) return;
       const dx = o.x - c.x, dy = o.y - c.y, d2 = dx * dx + dy * dy;
@@ -398,24 +413,32 @@ export class Life {
   // Collisions, predation and horizontal gene transfer.
   interact() {
     const cells = this.cells, n = cells.length, rng = this.w.rng, maxR = this.maxR;
+    const h = this.hash, st = h.start, items = h.items, gw = h.gw;
     for (let i = 0; i < n; i++) {
       const a = cells[i];
       if (a.dead) continue;
-      this.hash.query(a.x, a.y, a.r + maxR, (j) => {
-        if (j <= i || a.dead) return;
-        const b = cells[j];
-        if (b.dead) return;
-        const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = a.r + b.r;
-        if (d2 >= rr * rr) return;
-        const d = Math.sqrt(d2) || 0.01;
-        const nx = dx / d, ny = dy / d, ov = (rr - d) * 0.8, s = a.area + b.area; // membranes barely interpenetrate
-        a.x -= nx * ov * (b.area / s); a.y -= ny * ov * (b.area / s);
-        b.x += nx * ov * (a.area / s); b.y += ny * ov * (a.area / s);
-        if (a.org === b.org) return;
-        const ate = this.tryEat(a, b) || this.tryEat(b, a);
-        if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
-        if (!a.dead && !b.dead && rng.next() < CFG.HGT_P) this.transferGene(a, b);
-      });
+      // (The spatial-hash walk is inlined: this is one of the hottest loops in the simulation.)
+      h.box(a.x, a.y, a.r + maxR);
+      for (let cy = h.y0; cy <= h.y1; cy++) {
+        for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
+          for (let k = st[g], e = st[g + 1]; k < e; k++) {
+            const j = items[k];
+            if (j <= i || a.dead) continue;
+            const b = cells[j];
+            if (b.dead) continue;
+            const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = a.r + b.r;
+            if (d2 >= rr * rr) continue;
+            const d = Math.sqrt(d2) || 0.01;
+            const nx = dx / d, ny = dy / d, ov = (rr - d) * 0.8, s = a.area + b.area; // membranes barely interpenetrate
+            a.x -= nx * ov * (b.area / s); a.y -= ny * ov * (b.area / s);
+            b.x += nx * ov * (a.area / s); b.y += ny * ov * (a.area / s);
+            if (a.org === b.org) continue;
+            const ate = this.tryEat(a, b) || this.tryEat(b, a);
+            if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
+            if (!a.dead && !b.dead && rng.next() < CFG.HGT_P) this.transferGene(a, b);
+          }
+        }
+      }
     }
   }
 
@@ -423,19 +446,26 @@ export class Life {
   // Extra position-only pass so densely packed cells don't interpenetrate (visible at true scale).
   relax() {
     const cells = this.cells, n = cells.length, maxR = this.maxR;
+    const h = this.hash, st = h.start, items = h.items, gw = h.gw;
     for (let i = 0; i < n; i++) {
       const a = cells[i];
       if (a.dead) continue;
-      this.hash.query(a.x, a.y, a.r + maxR, (j) => {
-        if (j <= i) return;
-        const b = cells[j];
-        if (b.dead) return;
-        const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = (a.r + b.r) * 0.97;
-        if (d2 >= rr * rr) return;
-        const d = Math.sqrt(d2) || 0.01, ov = (rr - d) * 0.7, s = a.area + b.area;
-        a.x -= (dx / d) * ov * (b.area / s); a.y -= (dy / d) * ov * (b.area / s);
-        b.x += (dx / d) * ov * (a.area / s); b.y += (dy / d) * ov * (a.area / s);
-      });
+      h.box(a.x, a.y, a.r + maxR);
+      for (let cy = h.y0; cy <= h.y1; cy++) {
+        for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
+          for (let k = st[g], e = st[g + 1]; k < e; k++) {
+            const j = items[k];
+            if (j <= i) continue;
+            const b = cells[j];
+            if (b.dead) continue;
+            const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = (a.r + b.r) * 0.97;
+            if (d2 >= rr * rr) continue;
+            const d = Math.sqrt(d2) || 0.01, ov = (rr - d) * 0.7, s = a.area + b.area;
+            a.x -= (dx / d) * ov * (b.area / s); a.y -= (dy / d) * ov * (b.area / s);
+            b.x += (dx / d) * ov * (a.area / s); b.y += (dy / d) * ov * (a.area / s);
+          }
+        }
+      }
     }
   }
 

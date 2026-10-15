@@ -35,6 +35,17 @@ export class SpatialHash {
     for (let i = 0; i < n; i++) this.items[this.fill[cellOf[i]]++] = i;
   }
 
+  // The grid squares overlapping a query box, for hot loops that walk start/items themselves
+  // (same order as query(), without a callback per item): sets x0, x1, y0, y1.
+  box(x, y, r) {
+    const cs = this.cs;
+    let x0 = Math.floor((x - r) / cs), x1 = Math.floor((x + r) / cs);
+    let y0 = Math.floor((y - r) / cs), y1 = Math.floor((y + r) / cs);
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
+    if (x1 >= this.gw) x1 = this.gw - 1; if (y1 >= this.gh) y1 = this.gh - 1;
+    this.x0 = x0; this.x1 = x1; this.y0 = y0; this.y1 = y1;
+  }
+
   // Calls fn(index) for every item in cells overlapping the query box.
   // If fn returns true the query stops early.
   query(x, y, r, fn) {
