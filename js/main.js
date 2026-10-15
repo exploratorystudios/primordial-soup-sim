@@ -43,6 +43,10 @@ const speedIndexOf = (v) => v === Infinity ? SPEEDS.length - 1 : SPEEDS.reduce((
 // Milliseconds of simulation allowed per frame: 30 keeps the view smooth.
 const simBudget = (s) => (s <= 20 ? 30 : s <= 250 ? 45 : 90);
 let tpsTicks = 0, tpsSince = performance.now(), tps = 0;
+// True while a mouse button is held anywhere on the page (sliders, buttons, the view).
+let interacting = false;
+window.addEventListener('pointerdown', () => { interacting = true; }, true);
+for (const ev of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(ev, () => { interacting = false; }, true);
 
 function setSpeed(i) {
   speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i));
@@ -123,7 +127,8 @@ function frameStep() {
     rewindFrame();
   } else if (running) {
     acc += SPEEDS[speedIdx];
-    const t0 = performance.now(), budget = simBudget(SPEEDS[speedIdx]);
+    // While the mouse is held on the controls or dragging the view, keep frames short so it stays responsive.
+    const t0 = performance.now(), budget = interacting || drag ? Math.min(15, simBudget(SPEEDS[speedIdx])) : simBudget(SPEEDS[speedIdx]);
     // Stay responsive: never spend more than the budget simulating per frame.
     while (acc >= 1 && performance.now() - t0 < budget) { world.step(); acc--; tpsTicks++; }
     if (acc > 1) acc = 0; // (also what keeps Max from piling up)
