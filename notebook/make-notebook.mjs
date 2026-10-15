@@ -66,24 +66,21 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # All with longer-lived oxygen and Earth-like multicellularity (complex organisms must be eukaryotic). In run
-    # real1 that gave no complex life: eukaryotes were rare and died out. Staged tests showed oxygen poisons them
-    # unless their mitochondria give them aerobic respiration (MITO_AER), which on Earth is what mitochondria do.
-    # Reference without these: o2_x3_real in results-real1.jsonl (same seeds, 1001-1040).
-    # (SYMBIO_P and PRED_P are spelled out: since this run was set up, the defaults became 0.0005 and 0.4.)
-    "mito":            {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0, "PRED_P": 0.25},
-    # ...plus mitochondria by partnership (host and aerobe in contact merge; no hunting needed), two rates:
-    "mito_sym_lo":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.0001, "PRED_P": 0.25},
-    "mito_sym_hi":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001, "PRED_P": 0.25},
-    # ...plus predators catching prey more often (PRED_P 0.25 -> 0.4), so hunting pays and is less rare:
-    "mito_sym_pred":   {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001, "PRED_P": 0.4},
+    # All on the current defaults (longer-lived oxygen, Earth-like multicellularity, mitochondrial respiration,
+    # partnership endosymbiosis, PRED_P 0.4). In euk1 eukaryotes arose in half the worlds and mostly survived,
+    # but stayed tiny (4-9 cells) and never made complex organisms; worlds sat at the 4,000-cell cap (~78k
+    # crowding deaths each) and eukaryotes arrived late (~50k of 70k ticks). Run longer, and test:
+    "defaults":  {},
+    "euk_nut":   {"EUK_NUT": 0.5},                       # eukaryotes need half the nutrient to divide
+    "more_room": {"MAX_CELLS": 6000},                    # population cap 6,000 instead of 4,000
+    "both":      {"EUK_NUT": 0.5, "MAX_CELLS": 6000},
 }
-TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
+TICKS = 120_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = 40     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 1001          # (same seeds as real1, to compare with its o2_x3_real) use a fresh range for each new experiment: runs are deterministic, so reused seeds
+FIRST_SEED = 2001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "euk1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "room1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------

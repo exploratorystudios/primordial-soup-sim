@@ -91,7 +91,7 @@ export function decode(c) {
   c.colR = Math.round((p * 70 + ch * 235 + h * 150 + pr * 240) / s);
   c.colG = Math.round((p * 210 + ch * 150 + h * 110 + pr * 60) / s);
   c.colB = Math.round((p * 90 + ch * 50 + h * 240 + pr * 70) / s);
-  c.nutNeed = c.m * CFG.NUT_PER_AREA * 2; // enough body material for two cells
+  c.nutNeed = c.m * CFG.NUT_PER_AREA * 2 * (c.mito ? CFG.EUK_NUT : 1); // enough body material for two cells
   c.trophColor = `rgb(${c.colR},${c.colG},${c.colB})`;
   c.hueColor = `hsl(${Math.round(g[Gn.HUE] * 360)},75%,60%)`;
 }
@@ -194,7 +194,7 @@ export class Life {
     c.area = (c.r / 2) * (c.r / 2);
     c.m = Math.pow(c.area, 0.75);
     c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1);
-    c.nutNeed = c.m * CFG.NUT_PER_AREA * 2;
+    c.nutNeed = c.m * CFG.NUT_PER_AREA * 2 * (c.mito ? CFG.EUK_NUT : 1);
   }
 
   live(c) {
