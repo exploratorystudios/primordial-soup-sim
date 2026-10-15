@@ -11,7 +11,7 @@ const FINE_MAX = 48, COARSE_EVERY = 1000, COARSE_MAX = 12;
 
 let stopped = false;
 self.onmessage = (e) => {
-  if (e.data.cmd === 'start') run(e.data.seed, e.data.maxTicks || 150000);
+  if (e.data.cmd === 'start') { Object.assign(CFG, e.data.cfg || {}); run(e.data.seed, e.data.maxTicks || 150000); }
   else if (e.data.cmd === 'stop') stopped = true;
 };
 

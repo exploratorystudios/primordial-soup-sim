@@ -51,7 +51,7 @@ export class Story {
     this.worker = new Worker(new URL('./story-scout.js', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e) => this.onMessage(e.data);
     this.worker.onerror = (e) => { $('st-status').textContent = `Search failed: ${e.message}`; };
-    this.worker.postMessage({ cmd: 'start', seed });
+    this.worker.postMessage({ cmd: 'start', seed, cfg: this.app.cfg || {} });
     this.refreshList();
   }
 

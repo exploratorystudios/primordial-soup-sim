@@ -171,3 +171,5 @@ body.busy, body.busy * { cursor: progress !important; }
 .st-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 8px; }
 .st-foot .check { font-size: 11px; color: var(--muted); margin: 0; }
 button.active { border-color: var(--accent-2); color: var(--accent-2); }
+
+.cfg-note { color: #ffcc66; font-size: 11px; margin: 6px 0 0; }

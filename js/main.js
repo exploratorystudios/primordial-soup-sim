@@ -20,6 +20,15 @@ const ui = new UI();
 const opts = { colorMode: 'troph', overlay: 'none', showChem: true, selected: null, flash: null };
 
 const params = new URLSearchParams(location.search);
+// Experiments from the address bar: ?cfg={"DAY_SWING":0} overrides any setting in config.js, and
+// ?day=always is a shortcut for constant noon sunlight. They stay in the URL (and apply to new worlds
+// and the tour) until removed.
+const cfgOverrides = {};
+try { Object.assign(cfgOverrides, JSON.parse(params.get('cfg') || '{}')); } catch { /* ignore a malformed cfg */ }
+if (params.get('day') === 'always') Object.assign(cfgOverrides, { DAY_MEAN: 1, DAY_SWING: 0 });
+Object.assign(CFG, cfgOverrides);
+const extraParams = [...params].filter(([k]) => k === 'cfg' || k === 'day').map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
+const urlFor = (s) => `?seed=${s}${extraParams}`;
 let seed = +params.get('seed') || Math.floor(Math.random() * 1e6) + 1;
 $('seed').value = seed;
 let world = new World(seed);
@@ -50,6 +59,13 @@ function speedLabel() {
 // ?speed= in ticks per frame (0.01 … 250, or max).
 setSpeed(params.has('speed') ? speedIndexOf(params.get('speed') === 'max' ? Infinity : +params.get('speed') || SPEEDS[0]) : speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
+if (Object.keys(cfgOverrides).length) {
+  const what = params.get('day') === 'always' ? 'always daytime (full sun)' : JSON.stringify(cfgOverrides);
+  const note = document.createElement('p');
+  note.className = 'cfg-note';
+  note.textContent = `Custom settings (from the address bar): ${what}. Remove them from the URL to go back to normal.`;
+  $('scale-note').after(note);
+}
 
 function newWorld(s) {
   if (typeof story !== 'undefined') story.stop();
@@ -58,7 +74,7 @@ function newWorld(s) {
   world = new World(seed);
   ui.reset();
   opts.selected = null;
-  history.replaceState(null, '', `?seed=${seed}`);
+  history.replaceState(null, '', urlFor(seed));
 }
 
 let seeking = null; // { from: milestone count, start: tick } while jumping to the next milestone
@@ -67,6 +83,7 @@ let rewinding = null; // { t: the tick being shown (fractional), spec: what was 
 let lastNow = performance.now();
 // The tour (story mode) swaps in replayed worlds and drives the clock, but leaves the camera free.
 const story = new Story({
+  cfg: cfgOverrides,
   get world() { return world; },
   get running() { return running; },
   opts,
@@ -311,7 +328,7 @@ $('file-load').onchange = async (e) => {
     $('seed').value = seed;
     ui.reset();
     ui.seenLogs = w.logs.length; // don't replay old notifications
-    history.replaceState(null, '', `?seed=${seed}`);
+    history.replaceState(null, '', urlFor(seed));
     ui.toast(`Loaded seed ${seed} at tick ${w.t.toLocaleString()}`, w.t);
   } catch (err) {
     ui.toast(`Could not load: ${err.message}`, world.t);
