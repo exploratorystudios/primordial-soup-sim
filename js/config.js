@@ -94,6 +94,9 @@ export const CFG = {
                            // and flatworm paratomy, Volvox daughter colonies). Takes the place of FRAGMENT.
   PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway
   PARA_COST: 0.01,         // extra upkeep (x metabolic size) for a doubling colony beyond the oxygen-limited body size
+  TRADEOFF: 0,             // convex trade-off (Michod): a generalist cell in a colony feeds, swims and hunts at
+                           // 1 - TRADEOFF x min(1, (cells - 1) / 15) of full strength (doing every job at once costs
+                           // more as colonies grow; cf. Volvox's flagellation constraint). 0 = off; try 0.4
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,

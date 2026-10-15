@@ -40,6 +40,7 @@ export class Cell {
     this.bonds = [];
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
+    this.gf = 1; // TRADEOFF: a colony generalist's strength at its jobs
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
     this.heading = (id * 2.399) % 6.283;
@@ -307,7 +308,7 @@ export class Life {
 
   // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
   steer(c, tm, s) {
-    const mot = c.motil * tm[4];
+    const mot = c.motil * tm[4] * c.gf;
     // A colony swims as one body (COLONY_SWIM): every cell adds its mass, and its thrust if it swims.
     const col = CFG.COLONY_SWIM && c.orgSize > 1 && c.bonds.length > 0;
     let a;
@@ -384,19 +385,19 @@ export class Life {
 
   // A cell's traits as the kernels use them (rewritten when decode, resize or a new cell type bumps c.sv).
   packTraits(V, c, s) {
-    const g = c.g, tm = TM[c.type], m = c.m;
+    const g = c.g, tm = TM[c.type], m = c.m, gf = c.gf;
     V.SVER[s] = c.sv; V.ID[s] = c.id; V.R[s] = c.r; V.AREA[s] = c.area;
-    V.EFFPRED[s] = c.effPred; V.SENSE[s] = c.sense; V.MOT[s] = c.motil * tm[4];
+    V.EFFPRED[s] = c.effPred; V.SENSE[s] = c.sense; V.MOT[s] = c.motil * tm[4] * gf;
     V.WCHEM[s] = g[Gn.W_CHEM]; V.WORG[s] = g[Gn.W_ORG]; V.WOXY[s] = g[Gn.W_OXY]; V.WLIGHT[s] = g[Gn.W_LIGHT];
     V.WPREY[s] = g[Gn.W_PREY]; V.WFLEE[s] = g[Gn.W_FLEE];
     let f = 0;
     if (c.mito) f |= K.F_MITO;
     if (c.effPred > 0.05) f |= K.F_HUNTS;
-    if (c.effPred * tm[3] >= 0.04) f |= K.F_EATS; // (tryEat's first test)
+    if (c.effPred * tm[3] * gf >= 0.04) f |= K.F_EATS; // (tryEat's first test)
     if (!c.mito && c.dna && c.transl > 0.5) f |= K.F_SHOST; // (trySymbiosis's tests)
     if (!c.mito && c.aer > 0.5) f |= K.F_SPART;
     V.SFLAGS[s] = f;
-    const ep = c.effP * tm[0], ec = c.effC * tm[1], eh = c.effH * tm[2];
+    const ep = c.effP * tm[0] * gf, ec = c.effC * tm[1] * gf, eh = c.effH * tm[2] * gf;
     V.PHOTOF[s] = ep > 0 ? CFG.PHOTO_K * m * ep * (c.plastid ? 1.8 : 1) * c.prot : 0;
     V.DCHEMK[s] = ec > 0 ? CFG.CHEMO_K * m * ec : 0;
     V.DORGK[s] = eh > 0 ? CFG.HET_K * m * eh : 0;
@@ -591,7 +592,7 @@ export class Life {
 
   tryEat(a, b) {
     if (a.dead || b.dead) return false;
-    const pa = a.effPred * TM[a.type][3];
+    const pa = a.effPred * TM[a.type][3] * a.gf;
     if (pa < 0.04) return false;
     // Prey must be engulfable. Being part of a large colony is a defence (cf. Boraas' predation experiments).
     if (this.bodyRadius(a) < this.bodyRadius(b) * 1.2) return false;
@@ -702,7 +703,7 @@ export class Life {
     for (const c of cells) {
       if (c.dead || c._s === stamp) continue;
       c._s = stamp;
-      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
+      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; if (c.gf !== 1) { c.gf = 1; c.sv++; } if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
       q.length = 0; q.push(c);
       let root = c;
       for (let k = 0; k < q.length; k++) {
@@ -747,6 +748,9 @@ export class Life {
         x.orgSize = size;
         const nt = keep ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
         if (nt !== x.type) { x.type = nt; x.sv++; }
+        // Doing every job at once costs a colony's generalists more the bigger it is (TRADEOFF).
+        const gf = CFG.TRADEOFF > 0 && x.type === T_GENERIC ? Math.max(0.2, 1 - CFG.TRADEOFF * Math.min(1, (size - 1) / 15)) : 1;
+        if (gf !== x.gf) { x.gf = gf; x.sv++; }
         org.types[x.type]++;
         org.x += x.x; org.y += x.y;
       }
