@@ -54,14 +54,16 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    "baseline":    {},
-    "wide_uptake": {"VES_NT_REACH": 6},   # protocells draw in nucleotides from ~3 µm around them
+    "baseline":      {},
+    # Protocells draw in nucleotides from ~2 µm around them (2x the copying inside), and need 3 completed
+    # self-copies (not 1) before becoming a cell, which keeps independent origins of life as rare as now.
+    "pool_balanced": {"VES_NT_REACH": 4, "CELL_COPIES": 3},
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "ab1"           # results go to results-<RUN_TAG>.jsonl
+RUN_TAG = "pool1"           # results go to results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Node.js ---------------------------------------------------------

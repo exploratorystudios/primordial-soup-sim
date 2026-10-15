@@ -66,7 +66,7 @@ const [a, b] = (args.seeds || '1-8').split('-').map(Number);
 const seeds = [];
 for (let s = a; s <= (b || a); s++) seeds.push(s);
 const ticks = +(args.ticks || 60000);
-const jobs = +(args.jobs || Math.max(1, os.cpus().length - 2));
+const jobs = +(args.jobs || os.cpus().length); // each world is one busy core; use them all
 const self = fileURLToPath(import.meta.url);
 
 console.log(`Replaying ${seeds.length} worlds × ${ticks.toLocaleString()} ticks on ${jobs} cores…`);
