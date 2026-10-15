@@ -71,6 +71,7 @@ function newWorld(s) {
   if (typeof story !== 'undefined') story.stop();
   stopRewind(); rewind.clear();
   seed = s;
+  $('seed').value = seed;
   world = new World(seed);
   ui.reset();
   opts.selected = null;
@@ -347,8 +348,14 @@ for (const b of document.querySelectorAll('[data-fov]')) {
   };
 }
 $('speed').oninput = (e) => setSpeed(+e.target.value);
-$('btn-new').onclick = () => newWorld(Math.max(1, +$('seed').value || 1));
-$('seed').onkeydown = (e) => { if (e.key === 'Enter') $('btn-new').click(); };
+// New world: a fresh random world, unless a different seed has been typed in. Enter in the seed box
+// loads exactly that seed (so the current one can be restarted from tick 0).
+const randomSeed = () => Math.floor(Math.random() * 1e6) + 1;
+$('btn-new').onclick = () => {
+  const typed = Math.floor(+$('seed').value);
+  newWorld(typed >= 1 && typed !== seed ? typed : randomSeed());
+};
+$('seed').onkeydown = (e) => { if (e.key === 'Enter') newWorld(Math.max(1, Math.floor(+$('seed').value) || 1)); };
 $('color-mode').onchange = (e) => { opts.colorMode = e.target.value; };
 $('overlay').onchange = (e) => { opts.overlay = e.target.value; };
 $('show-chem').onchange = (e) => { opts.showChem = e.target.checked; };
