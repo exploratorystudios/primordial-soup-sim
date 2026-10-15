@@ -11,7 +11,7 @@ import { saveToFile, loadFromFile } from './persist.js';
 
 // Ticks per frame. Below 1 the view interpolates between ticks. Max runs the simulation as fast as
 // the CPU allows, giving it most of each frame (a choppier view in exchange for more ticks).
-const SPEEDS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 250, Infinity];
+const SPEEDS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 250];
 const $ = (id) => document.getElementById(id);
 
 const canvas = $('world');
@@ -34,12 +34,14 @@ $('seed').value = seed;
 let world = new World(seed);
 let running = true;
 let speedIdx = SPEEDS.indexOf(5);
+let maxOn = false; // the Max toggle: as fast as the CPU allows (the slider keeps its setting for when it's off)
+const curSpeed = () => (maxOn ? Infinity : SPEEDS[speedIdx]);
 let frame = 0;
 let acc = 0;
 let alpha = 1; // how far between the previous and current tick to draw (smoothing at slow speeds)
 
 // The slider setting nearest to v ticks per frame.
-const speedIndexOf = (v) => v === Infinity ? SPEEDS.length - 1 : SPEEDS.reduce((b, s, i) => (Math.abs(Math.log(s / v)) < Math.abs(Math.log(SPEEDS[b] / v)) ? i : b), 0);
+const speedIndexOf = (v) => SPEEDS.reduce((b, s, i) => (Math.abs(Math.log(s / v)) < Math.abs(Math.log(SPEEDS[b] / v)) ? i : b), 0);
 // Milliseconds of simulation allowed per frame: 30 keeps the view smooth.
 const simBudget = (s) => (s <= 20 ? 30 : s <= 250 ? 45 : 90);
 let tpsTicks = 0, tpsSince = performance.now(), tps = 0;
@@ -54,7 +56,8 @@ function setSpeed(i) {
   speedLabel();
 }
 function speedLabel() {
-  const s = SPEEDS[speedIdx];
+  const s = curSpeed();
+  $('btn-max').classList.toggle('active', maxOn);
   const set = s === Infinity ? 'max' : s < 1 ? `1 tick/${Math.round(1 / s)} fr` : `${s}/frame`;
   // When the setting is more than the CPU can do, say what it actually achieves. (Kept to one line of
   // fixed width: if the label wrapped, the buttons below jumped and clicks on them could miss.)
@@ -64,7 +67,9 @@ function speedLabel() {
   el.title = s === Infinity ? `As fast as possible: ≈${rate} ticks per second` : s < 1 ? `One tick every ${Math.round(1 / s)} frames` : `${s} ticks per frame${capped ? `; the CPU manages ≈${rate} ticks per second` : ''}`;
 }
 // ?speed= in ticks per frame (0.01 … 250, or max).
-setSpeed(params.has('speed') ? speedIndexOf(params.get('speed') === 'max' ? Infinity : +params.get('speed') || SPEEDS[0]) : speedIdx);
+function setMax(on) { maxOn = on; speedLabel(); }
+if (params.get('speed') === 'max') { maxOn = true; setSpeed(speedIdx); }
+else setSpeed(params.has('speed') ? speedIndexOf(+params.get('speed') || SPEEDS[0]) : speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
 if (Object.keys(cfgOverrides).length) {
   const what = params.get('day') === 'always' ? 'always daytime (full sun)' : JSON.stringify(cfgOverrides);
@@ -99,7 +104,7 @@ const story = new Story({
   renderer,
   setWorld(w) { stopRewind(); rewind.clear(); world = w; ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null; flight = null; acc = 0; alpha = 1; },
   setRunning(b) { running = b; playLabel(); },
-  setSpeed: (v) => setSpeed(speedIndexOf(v)),
+  setSpeed: (v) => { maxOn = false; setSpeed(speedIndexOf(v)); }, // (each tour chapter plays at its own speed)
   setOverlay(o) { opts.overlay = o; $('overlay').value = o; },
   follow: storyFollow,
 });
@@ -126,14 +131,15 @@ function frameStep() {
   } else if (rewinding) {
     rewindFrame();
   } else if (running) {
-    acc += SPEEDS[speedIdx];
+    const sp = curSpeed();
+    acc += sp;
     // While the mouse is held on the controls or dragging the view, keep frames short so it stays responsive.
-    const t0 = performance.now(), budget = interacting || drag ? Math.min(15, simBudget(SPEEDS[speedIdx])) : simBudget(SPEEDS[speedIdx]);
+    const t0 = performance.now(), budget = interacting || drag ? Math.min(15, simBudget(sp)) : simBudget(sp);
     // Stay responsive: never spend more than the budget simulating per frame.
     while (acc >= 1 && performance.now() - t0 < budget) { world.step(); acc--; tpsTicks++; }
     if (acc > 1) acc = 0; // (also what keeps Max from piling up)
-    alpha = SPEEDS[speedIdx] >= 1 ? 1 : acc;
-    world.smooth = SPEEDS[speedIdx] < 1; // only pay for in-between frames when they're visible
+    alpha = sp >= 1 ? 1 : acc;
+    world.smooth = sp < 1; // only pay for in-between frames when they're visible
     rewind.record(world, performance.now() - t0);
   }
   if (now - tpsSince > 500) { tps = (tpsTicks * 1000) / (now - tpsSince); tpsTicks = 0; tpsSince = now; speedLabel(); }
@@ -197,7 +203,7 @@ function stopRewind() {
   playLabel();
 }
 function rewindFrame() {
-  const s = SPEEDS[speedIdx], v = s === Infinity ? 250 : s, oldest = rewind.oldest();
+  const s = curSpeed(), v = s === Infinity ? 250 : s, oldest = rewind.oldest();
   const r = rewinding;
   r.t -= v;
   let end = false;
@@ -355,7 +361,8 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     if (sel && !sel.gone) { const c = centreOf(sel); renderer.cam.x = c.x; renderer.cam.y = c.y; followOn = sel.follow = true; startFollow(sel); }
   };
 }
-$('speed').oninput = (e) => setSpeed(+e.target.value);
+$('speed').oninput = (e) => { maxOn = false; setSpeed(+e.target.value); }; // (moving the slider leaves Max)
+$('btn-max').onclick = () => setMax(!maxOn);
 // New world: a fresh random world, unless a different seed has been typed in. Enter in the seed box
 // loads exactly that seed (so the current one can be restarted from tick 0).
 const randomSeed = () => Math.floor(Math.random() * 1e6) + 1;
@@ -384,8 +391,9 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'f' || e.key === 'F') toggleFollow();
   else if (story.active && e.key === 'ArrowLeft') { e.preventDefault(); $('st-back').click(); }
   else if (story.active && e.key === 'ArrowRight') { e.preventDefault(); $('st-fwd').click(); }
-  else if (e.key === '+' || e.key === '=') setSpeed(speedIdx + 1);
-  else if (e.key === '-') setSpeed(speedIdx - 1);
+  else if (e.key === '+' || e.key === '=') { maxOn = false; setSpeed(speedIdx + 1); }
+  else if (e.key === '-') { maxOn = false; setSpeed(speedIdx - 1); }
+  else if (e.key === 'm' || e.key === 'M') setMax(!maxOn);
   else if (e.key === 'r' || e.key === 'R') $('btn-rew').click();
 });
 

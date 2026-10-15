@@ -68,7 +68,8 @@ label.check { display: flex; gap: 6px; align-items: center; }
 input[type=range] { flex: 1; }
 input[type=number] { width: 70px; }
 #speed { flex: 1; min-width: 0; }
-#speed-val { flex: none; width: 118px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+#btn-max { flex: none; padding: 2px 8px; }
+#speed-val { flex: none; width: 104px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 button, select, input[type=number] {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
