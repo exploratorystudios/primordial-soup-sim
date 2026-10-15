@@ -6,6 +6,7 @@ import { TYPE_COLORS } from './render.js';
 import * as Gn from './genome.js';
 import { formatLen, NM_PER_UNIT, DIM } from './render.js';
 import { children, info, ancestors, crumbLabel } from './parts.js';
+import { maturity, stage, phospholipidShare, peptides, protoRibosome, magnesiumCount } from './protocell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -212,17 +213,24 @@ export class UI {
 
   vesicleHTML(v) {
     const reps = v.polys.filter((p) => p.act > 0);
+    const m = maturity(v), ph = phospholipidShare(m), peps = peptides(v, m), core = protoRibosome(v, m);
+    const mg = v.polys.reduce((n, p) => n + magnesiumCount(p), 0);
     return `<div class="insp-title">${reps.length ? 'Protocell' : 'Lipid vesicle'}</div>
       <div class="insp-kv">
+        <span>Stage</span><span>${stage(m)} (${(m * 100).toFixed(0)}% of the way to life)</span>
         <span>Diameter</span><span>${formatLen(v.r * 2 * NM_PER_UNIT)}</span>
-        <span>Membrane</span><span>4 nm fatty-acid bilayer</span>
+        <span>Membrane</span><span>4 nm bilayer: ${ph < 0.01 ? 'fatty acids' : `${(100 - ph * 100).toFixed(0)}% fatty acids, ${(ph * 100).toFixed(0)}% phospholipids`}</span>
+        <span>Mg²⁺ on ribozymes</span><span>${mg || '—'}</span>
+        <span>Peptides</span><span>${peps.length ? peps.map((p) => p.seq.join('-')).join(', ') : '—'}</span>
+        <span>Proto-ribosome</span><span>${core ? `forming (from a ${core.seq.length} nt ribozyme)` : '—'}</span>
         <span>Membrane units (sim)</span><span>${v.L}</span>
         <span>Generation</span><span>${v.gen}</span>
         <span>RNA inside</span><span>${v.polys.length} (${reps.length} replicating)</span>
         <span>Self-copies made</span><span>${v.copies}</span>
         <span>Nucleotide pool A/U/G/C</span><span>${v.pool.join(' / ')}</span>
       </div>
-      <p class="muted">Vesicles grow by absorbing lipids and split when large; ones packed with replicators grow faster. Once a lineage has divided twice and its replicators have copied themselves, the protocell becomes a living cell.</p>`;
+      <p class="muted">Vesicles grow by absorbing fatty acids and divide through a string of beads; ones packed with replicators grow faster. Once a lineage has divided twice and its replicators have copied themselves, the protocell becomes a living cell.</p>
+      <p class="muted">On the way, as drawn here: phospholipids mix into the leaky fatty-acid membrane (well established in experiments), ribozymes hold magnesium ions (established), short peptides of prebiotic amino acids appear (plausible), and the best ribozyme grows into a proto-ribosome that joins amino acids (a leading idea, unproven). These follow the lineage’s progress in the simulation but are not simulated themselves.</p>`;
   }
 
   cellHTML(world, c) {

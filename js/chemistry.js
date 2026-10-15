@@ -337,15 +337,16 @@ export class Soup {
       const np = v.polys.length;
 
       // Absorb lipids (grow) and nucleotides (fatty-acid membranes are permeable to them).
-      const rr = v.r + 1.5, rr2 = rr * rr;
+      // Fatty-acid membranes are leaky: nucleotides diffusing nearby are drawn in, lipids only on contact.
+      const rr = v.r + 1.5, rr2 = rr * rr, rn = v.r + CFG.VES_NT_REACH, rn2 = rn * rn;
       let poolTotal = v.pool[0] + v.pool[1] + v.pool[2] + v.pool[3];
-      this.hash.query(v.x, v.y, rr, (j) => {
+      this.hash.query(v.x, v.y, Math.max(rr, rn), (j) => {
         if (md[j]) return;
-        const dx = mx[j] - v.x, dy = my[j] - v.y;
-        if (dx * dx + dy * dy > rr2) return;
+        const dx = mx[j] - v.x, dy = my[j] - v.y, d2 = dx * dx + dy * dy;
+        if (d2 > (mt[j] === LIPID ? rr2 : rn2)) return;
         if (mt[j] === LIPID) {
           // Vesicles full of RNA swell osmotically and steal membrane from their neighbours.
-          if (rng.next() < 0.25 + 0.12 * np) { v.L++; this.kill(j, v, 'joined the membrane of a vesicle'); }
+          if (rng.next() < 0.25 + 0.12 * np) { v.L++; w.emit('ljoin', 15, { v, x: mx[j], y: my[j] }); this.kill(j, v, 'joined the membrane of a vesicle'); }
         } else if (poolTotal < CFG.VES_POOL && rng.next() < 0.5) {
           v.pool[mt[j]]++; poolTotal++; this.kill(j, v, 'diffused into a protocell');
         }
@@ -436,7 +437,9 @@ export class Soup {
           this.world.emit('copy', 12, { p, i: p.prog - 1, x: v.x + Math.cos(a) * v.r * 0.6, y: v.y + Math.sin(a) * v.r * 0.6 });
           if (p.prog >= p.seq.length) {
             const seq = this.finishCopy(p);
-            polys.push(Object.assign(this.makePolymer(seq, v.x, v.y), { home: v }));
+            const kid = Object.assign(this.makePolymer(seq, v.x, v.y), { home: v });
+            polys.push(kid);
+            this.world.emit('ipeel', 30, { kid, parent: p, v });
             v.copies++;
             this.world.milestone('replicator', 'A ribozyme copies itself: the RNA world begins', p);
           }
@@ -473,7 +476,7 @@ export class Soup {
     // Follow the daughter that inherited more of the contents.
     v.dead = true;
     v.next = a.polys.length >= b.polys.length ? a : b;
-    this.world.emit('vsplit', 25, { a, b, v });
+    this.world.emit('vsplit', 50, { a, b, v });
     v.nextWhy = 'divided in two; following the daughter with more RNA';
     for (let t = 0; t < 4; t++) { a.pool[t] = v.pool[t] >> 1; b.pool[t] = v.pool[t] - a.pool[t]; }
     a.copies = b.copies = v.copies; // replication history of the lineage

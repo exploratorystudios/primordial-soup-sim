@@ -7,6 +7,7 @@ import { NM_PER_UNIT, DIM, formatLen, dnaBase } from './render.js';
 import { ribosomeModel, ribosomeAngle, AMINO_NAMES } from './ribosome.js';
 import { wallLayers, wallLayerR, WALL_LINK, WALL_UNIT, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, local, toLocal, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
 import { TYPE_NAMES } from './life.js';
+import { maturity, phospholipidShare, peptides, protoRibosome, magnesiumCount, PREBIOTIC_AA } from './protocell.js';
 import * as Gn from './genome.js';
 
 const NM = 1 / NM_PER_UNIT;
@@ -181,15 +182,36 @@ function lipidCount(rUnits, areaPerLipid) {
 // --------------------------------------------------------------- vesicles
 function vesicleParts(s, renderer) {
   const v = s.obj, dead = () => v.dead, out = [];
-  const mem = part('Fatty-acid bilayer membrane', anchored(() => ({ x: v.x + v.r, y: v.y }), DIM.bilayer * NM * 3, dead), {
-    title: 'Fatty-acid bilayer',
-    kv: [['Thickness', '≈ 4 nm'], ['Diameter', um(v.r * 2)], ['Molecules (3D estimate)', lipidCount(v.r, 0.3)]],
-    desc: 'Two layers of fatty acids, tails inward. Leaky enough to let nucleotides diffuse in, tight enough to keep RNA chains trapped.',
+  const m = maturity(v), ph = phospholipidShare(m);
+  const mem = part(ph > 0.01 ? 'Mixed bilayer membrane' : 'Fatty-acid bilayer membrane', anchored(() => ({ x: v.x + v.r, y: v.y }), DIM.bilayer * NM * 3, dead), {
+    title: ph > 0.01 ? 'Fatty-acid / phospholipid bilayer' : 'Fatty-acid bilayer',
+    kv: [['Thickness', '≈ 4 nm'], ['Diameter', um(v.r * 2)], ['Molecules (3D estimate)', lipidCount(v.r, 0.3)], ['Phospholipids', `${(ph * 100).toFixed(0)}% (blue heads, two tails)`]],
+    desc: ph > 0.01
+      ? 'Two layers of lipids, tails inward. Phospholipids are mixing in among the fatty acids: they pack tighter, so the membrane gets sturdier and less leaky. A fully phospholipid membrane, as in cells, keeps nucleotides out, so cells later need transport proteins.'
+      : 'Two layers of fatty acids, tails inward. Leaky enough to let nucleotides diffuse in, tight enough to keep RNA chains trapped.',
   }, { parent: s, ring: { c: v, phospho: false, label: 'A fatty acid in the membrane' }, outline: () => ({ type: 'circle', x: v.x, y: v.y, r: v.r, w: DIM.bilayer * NM }) });
   mem.kids = () => [membraneLipid(() => v.x, () => v.y, () => v.r, 0, dead, mem, 'A fatty acid in the membrane')];
   out.push(mem);
+  const core = protoRibosome(v, m);
   for (const p of v.polys) {
-    out.push(sel('polymer', p, { parent: s, label: `RNA, ${p.seq.length} nt${p.act > 0 ? ' · ribozyme' : ''}`, note: p.act > 0 ? `${(p.act * 100).toFixed(0)}% active` : '' }));
+    out.push(sel('polymer', p, { parent: s, label: `RNA, ${p.seq.length} nt${p === core ? ' · proto-ribosome' : p.act > 0 ? ' · ribozyme' : ''}`, note: p.act > 0 ? `${(p.act * 100).toFixed(0)}% active · ${magnesiumCount(p)} Mg²⁺` : '' }));
+  }
+  if (core) out.push(part('Proto-ribosome', anchored(() => core, Math.max(5, (core.seq.length * DIM.ntRise) / 2 + 2.5) * NM, dead), {
+    title: 'Proto-ribosome (hypothesis)',
+    kv: [['Built from', `a ${core.seq.length} nt ribozyme`], ['Size', '≈ 10 nm']],
+    desc: 'The protocell’s best ribozyme, folded together with more RNA into a pocket that joins amino acids into chains. The heart of every modern ribosome is RNA that does exactly this, which suggests it began as a structure like this one.',
+  }, { parent: s }));
+  const peps = peptides(v, m);
+  if (peps.length) {
+    const g = part('Peptides', anchored(() => v, v.r * 0.6, dead), {
+      title: 'Short peptides (plausible)', kv: [['Count', String(peps.length)], ['Amino acids', PREBIOTIC_AA.join(', ')]],
+      desc: 'Short chains of the amino acids that form without life (as in the Miller–Urey experiments). Some stick to the RNA and may help it fold or work: an early partnership between RNA and protein.',
+    }, { parent: s, group: true, note: `×${peps.length}` });
+    g.kids = () => peps.map((pep) => part(`Peptide ${pep.seq.join('-')}`, anchored(() => renderer.peptideAt(v, pep, v.r - DIM.bilayer * NM, protoRibosome(v, maturity(v))), pep.seq.length * 0.3 * NM, dead), {
+      title: `Peptide, ${pep.seq.length} amino acids`, kv: [['Sequence', pep.seq.join('-')], ['Length', `≈ ${(pep.seq.length * 0.38).toFixed(1)} nm`], ['Where', pep.onRNA ? 'stuck to an RNA strand' : 'free in the protocell']],
+      desc: 'Amino acids linked by peptide bonds. Without a ribosome and a genetic code their order is random, not encoded.',
+    }, { parent: g }));
+    out.push(g);
   }
   const inner = () => v.r - DIM.bilayer * NM;
   for (let t = 0; t < 4; t++) {

@@ -30,17 +30,17 @@ export const CHAPTERS = {
   },
   innercopy: {
     title: 'RNA copying inside a protocell',
-    text: 'Trapped inside a vesicle, a ribozyme copies itself from the nucleotides that leak in. Its copies stay inside: the bubble and its RNA now share a fate.',
+    text: 'Trapped inside a vesicle, a ribozyme (holding the magnesium ions it needs, green) copies itself from nucleotides that leak in through the membrane: the copy pairs along it as a short double strand, then peels away. Its copies stay inside: the bubble and its RNA now share a fate.',
     speed: 0.25,
   },
   protocell: {
     title: 'A protocell divides',
-    text: 'As its membrane takes up more lipids the protocell swells, until it pinches in two. Each daughter carries some of the RNA: heredity, before there were cells.',
+    text: 'As fatty acids slip into its membrane the protocell swells, stretches into a string of beads and splits in two. Each daughter carries some of the RNA: heredity, before there were cells. Zoom in on the membrane: as a lineage matures, phospholipids (blue heads, two tails) mix in among the fatty acids.',
     speed: 1,
   },
   cell: {
     title: 'Life begins',
-    text: 'When a protocell holds enough working ribozymes, its chemistry becomes self-sustaining. Watch it switch on and become the first living cell (abiogenesis).',
+    text: 'When a protocell holds enough working ribozymes, its chemistry becomes self-sustaining. Watch it switch on and become the first living cell (abiogenesis). Mature protocells also carry short peptides and, in the leading hypothesis, a proto-ribosome: RNA that joins amino acids.',
     speed: 1,
   },
   division: {

@@ -6,6 +6,7 @@
 import { CFG } from './config.js';
 import { LIPID, BASES } from './chemistry.js';
 import { RNG } from './rng.js';
+import { maturity, phospholipidShare, peptides, protoRibosome, magnesiumCount, aaColor, rand01 } from './protocell.js';
 import { ribosomeModel, ribosomeAngle, AMINO, translationState } from './ribosome.js';
 import { polymerases, replicationProgress, translationPhase, hash32, GENE_LEN, wallLayers, wallLayerR, WALL_LINK, WALL_UNIT, buildAnatomy, microtubules, erRibosomes, golgiCisternae, golgiVesicles, nuclearPores, piliLines, flagellumPath, capsids, mitoSize, plastSize, cristae, grana, membraneProteinAt, membraneProteinSpacing } from './anatomy.js';
 
@@ -190,6 +191,22 @@ export class Renderer {
     this.drawVents(world);
     this.drawWater();
     this.prepFx(world);
+    // Dividing protocells pinch through a string of beads (pearling): the daughters are drawn held
+    // apart with a bead of membrane between them, which shrinks away as they settle (drawFxUnder).
+    const movedV = [];
+    for (const e of this.fxNow) {
+      e._pearl = null;
+      if (e.type !== 'vsplit') continue;
+      const a = e.a, b = e.b;
+      if (!a || !b || a.dead || b.dead) continue;
+      const d = Math.hypot(b.x - a.x, b.y - a.y) || 1e-6;
+      if (d > (a.r + b.r) * 1.6) continue;
+      const rm0 = Math.min(a.r, b.r) * 0.45, need = a.r + b.r + 1.8 * rm0;
+      const f = 1 + (Math.max(1, need / d) - 1) * smooth01(0, 0.2, e.u) * (1 - smooth01(0.55, 1, e.u)); // stretch out, then settle
+      e._pearl = { rm0 };
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      for (const o of [a, b]) { movedV.push([o, o.x, o.y]); o.x = mx + (o.x - mx) * f; o.y = my + (o.y - my) * f; }
+    }
     if (opts.showChem) this.drawChemistry(world);
     // Dividing cells are drawn emerging from between them (a stretching peanut). The pinch is centred
     // on where the two daughters are now, not where the mother was: at high speed the 30 ticks of the
@@ -199,10 +216,10 @@ export class Renderer {
     const moved = [], pinched = new Set();
     for (let i = this.fxNow.length - 1; i >= 0; i--) {
       const e = this.fxNow[i];
-      if (e.type !== 'divide' && e.type !== 'vsplit') continue;
+      if (e.type !== 'divide') continue;
       const a = e.a, b = e.b;
       e._skip = !a || !b || a.dead || b.dead || pinched.has(a) || pinched.has(b) || Math.hypot(b.x - a.x, b.y - a.y) > (a.r + b.r) * 1.6;
-      if (e._skip || e.type !== 'divide') continue;
+      if (e._skip) continue;
       pinched.add(a); pinched.add(b);
       const k = ease(Math.min(1, e.u * 1.6)), f = 0.55 + 0.45 * k, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       for (const c of [a, b]) {
@@ -219,6 +236,7 @@ export class Renderer {
     this.drawViruses(world);
     this.drawFx(world);
     for (const c of fading) c._fade = undefined;
+    for (const [o, x, y] of movedV) { o.x = x; o.y = y; }
     for (const [c, x, y] of moved) { c.x = x; c.y = y; c._dividing = false; }
 
     if (opts.selection) this.drawSelection(opts.selection);
@@ -522,6 +540,43 @@ export class Renderer {
     main.restore();
   }
 
+  // The bead of membrane between two dividing protocells, joined to each by a thinning neck.
+  drawPearl(e) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, a = e.a, b = e.b, u = e.u;
+    if (!this.inView((a.x + b.x) / 2, (a.y + b.y) / 2, a.r + b.r)) return;
+    const rm = e._pearl.rm0 * (1 - smooth01(0.2, 0.6, u));
+    if (rm * this.ppu < 0.8) return;
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, neck = rm * 0.4 * (1 - smooth01(0.1, 0.45, u));
+    const alive = a.polys.some((p) => p.act > 0) || b.polys.some((p) => p.act > 0);
+    const line = alive ? 'rgba(255,190,245,0.95)' : 'rgba(245,232,180,0.95)';
+    ctx.fillStyle = alive ? 'rgba(255,120,230,0.12)' : 'rgba(255,240,190,0.06)';
+    ctx.strokeStyle = line;
+    ctx.lineWidth = Math.max(DIM.bilayer * NM, this.px);
+    if (neck * this.ppu > 0.5) {
+      // Necks: thin membrane tubes from each daughter to the bead.
+      for (const [o, s] of [[a, 1], [b, -1]]) {
+        const x0 = o.x + ux * s * o.r * 0.9, y0 = o.y + uy * s * o.r * 0.9, x1 = mx - ux * s * rm * 0.9, y1 = my - uy * s * rm * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(x0 - uy * neck - cx, y0 + ux * neck - cy); ctx.lineTo(x1 - uy * neck - cx, y1 + ux * neck - cy);
+        ctx.moveTo(x0 + uy * neck - cx, y0 - ux * neck - cy); ctx.lineTo(x1 + uy * neck - cx, y1 - ux * neck - cy);
+        ctx.stroke();
+      }
+    }
+    ctx.beginPath(); ctx.arc(mx - cx, my - cy, rm, 0, TAU); ctx.fill(); ctx.stroke();
+  }
+
+  // A new RNA strand in a protocell, just finished: it starts paired alongside its template, then
+  // the two come apart and it drifts to its own place.
+  peelOut(p) {
+    const e = p._ipeel, q = e.parent;
+    if (!q || q.dead || q._drawFa === undefined) return;
+    const k = smooth01(0.3, 1, e.u), a = q._drawFa + Math.PI / 2;
+    const sx = q.x + Math.cos(a) * 1.1 * NM, sy = q.y + Math.sin(a) * 1.1 * NM;
+    p.x = p._rx = sx + (p.x - sx) * k; p.y = p._ry = sy + (p.y - sy) * k;
+    p._drawFa = q._drawFa + (p._drawFa - q._drawFa) * k;
+  }
+
   // ------------------------------------------------------------- event animations
   // Events from the simulation (world.fx) play out over a few dozen ticks of simulation time, so
   // they are visible at slow speeds and freeze when paused.
@@ -532,6 +587,7 @@ export class Renderer {
       if (u < 0 || u > 1) {
         if (e.type === 'peel' && e.kid._peel === e) e.kid._peel = null;
         if (e.type === 'copy' && e.p._copyFx === e) e.p._copyFx = null;
+        if (e.type === 'ipeel' && e.kid._ipeel === e) e.kid._ipeel = null;
         if (e.type === 'bond' && e.p._bondFx === e) e.p._bondFx = null;
         if (e.type === 'vescape') for (const v of e.vs) if (v._esc === e) v._esc = null;
         continue;
@@ -540,6 +596,7 @@ export class Renderer {
       this.fxNow.push(e);
       if (e.type === 'peel') e.kid._peel = e;
       if (e.type === 'copy') e.p._copyFx = e;
+      if (e.type === 'ipeel') e.kid._ipeel = e;
       if (e.type === 'bond') e.p._bondFx = e;
       if (e.type === 'vescape') for (const v of e.vs) v._esc = e;
     }
@@ -550,7 +607,8 @@ export class Renderer {
   drawFxUnder() {
     const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
     for (const e of this.fxNow) {
-      if ((e.type !== 'divide' && e.type !== 'vsplit') || e._skip) continue;
+      if (e.type === 'vsplit') { if (e._pearl) this.drawPearl(e); continue; }
+      if (e.type !== 'divide' || e._skip) continue;
       const a = e.a, b = e.b;
       if (a.dead || b.dead || !this.inView(a.x, a.y, a.r * 3) || a.r * this.ppu < 2) continue;
       const k = ease(e.u), ra = a.r * 0.92, rb = b.r * 0.92;
@@ -692,6 +750,19 @@ export class Renderer {
             const a = (i / e.pts.length) * TAU, tx = v.x + Math.cos(a) * v.r, ty = v.y + Math.sin(a) * v.r;
             ctx.fillRect(x0 + (tx - x0) * k - cx - h, y0 + (ty - y0) * k - cy - h, 2 * h, 2 * h);
           });
+          break;
+        }
+        case 'ljoin': {
+          // A fatty acid from the water slips into a protocell's membrane (how vesicles grow).
+          const v = e.v;
+          if (v.dead || this.pxnm < 0.6 || !this.inView(e.x, e.y, v.r)) break;
+          const dx = e.x - v.x, dy = e.y - v.y, d = Math.hypot(dx, dy) || 1;
+          const tx = v.x + (dx / d) * v.r, ty = v.y + (dy / d) * v.r;
+          const x = e.x + (tx - e.x) * k, y = e.y + (ty - e.y) * k;
+          ctx.globalAlpha = 1 - smooth01(0.75, 1, u);
+          if (this.pxnm >= 2.5) this.drawMonomer(x, y, LIPID, Math.atan2(-dy, -dx));
+          else { const h = Math.max(0.5 * NM, 0.65 * px); ctx.fillStyle = MONO_COLORS[LIPID]; ctx.fillRect(x - cx - h, y - cy - h, 2 * h, 2 * h); }
+          ctx.globalAlpha = 1;
           break;
         }
         case 'abio': {
@@ -899,8 +970,40 @@ export class Renderer {
       if (wantLabels) labels.push([seq[i], ctx.getTransform().transformPoint({ x: 0, y: 0.9 })]);
       ctx.restore();
     }
-    // The daughter strand being assembled base by base on the template.
+    // Magnesium ions held along the folded ribozyme: it needs them to fold and to catalyse.
+    const nMg = magnesiumCount(p);
+    if (nMg && this.pxnm >= 5) {
+      ctx.fillStyle = 'rgba(166,240,140,0.95)';
+      ctx.beginPath();
+      const mg = [];
+      for (let j = 0; j < nMg; j++) {
+        const i = Math.min(pts.length - 1, Math.floor(((j + 0.5) * pts.length) / nMg)), [qx, qy, dx, dy] = pts[i];
+        const side = j % 2 ? 1 : -1, wob = Math.sin(this.time * 0.5 + j * 2.1) * 0.12;
+        const mx = qx + dx * side * 0.9 + wob, my = qy + dy * side * 0.9 - wob;
+        ctx.moveTo(mx + 0.22, my); ctx.arc(mx, my, 0.22, 0, TAU);
+        mg.push([mx, my]);
+      }
+      ctx.fill();
+      if (wantLabels && this.pxnm >= 30) for (const [mx, my] of mg) labels.push(['Mg²⁺', ctx.getTransform().transformPoint({ x: mx, y: my - 0.5 })]);
+    }
+    // The daughter strand being assembled base by base on the template: paired to it like a short
+    // double helix (its own backbone, hydrogen bonds across), growing one nucleotide at a time.
     if (p.copy && p.prog > 0) {
+      const done = Math.min(p.prog, pts.length) - (p._copyFx && p._copyFx.i === p.prog - 1 ? 1 : 0);
+      if (done > 0) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 0.06;
+        ctx.setLineDash([0.1, 0.08]);
+        ctx.beginPath();
+        for (let i = 0; i < done; i++) { const [qx, qy, dx, dy] = pts[i]; ctx.moveTo(qx - dx * 0.2, qy - dy * 0.2); ctx.lineTo(qx - dx * 0.35, qy - dy * 0.35); }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = p.act > 0 ? 'rgba(255,157,232,0.7)' : 'rgba(244,162,89,0.7)';
+        ctx.lineWidth = 0.18;
+        ctx.beginPath();
+        for (let i = 0; i < done; i++) { const [qx, qy, dx, dy] = pts[i]; i ? ctx.lineTo(qx - dx * 0.95, qy - dy * 0.95) : ctx.moveTo(qx - dx * 0.95, qy - dy * 0.95); }
+        ctx.stroke();
+      }
       for (let i = 0; i < p.prog && i < pts.length; i++) {
         const [qx, qy, dx, dy] = pts[i];
         let tx = qx - dx * 0.45, ty = qy - dy * 0.45;
@@ -919,7 +1022,7 @@ export class Renderer {
       }
     }
     ctx.restore();
-    for (const [t, pt] of labels) this.screenText(BASES[t], pt.x, pt.y, 10);
+    for (const [t, pt] of labels) this.screenText(typeof t === 'string' ? t : BASES[t], pt.x, pt.y, typeof t === 'string' ? 8 : 10);
   }
 
   drawVesicle(ve, molecular) {
@@ -932,15 +1035,23 @@ export class Renderer {
       ctx.fillRect(X - h, Y - h, 2 * h, 2 * h);
       return;
     }
+    // How far this protocell has come toward life (see protocell.js): its membrane stiffens with
+    // phospholipids, peptides appear, and finally its best ribozyme becomes a proto-ribosome.
+    const m = maturity(ve), ph = phospholipidShare(m);
     ctx.fillStyle = alive ? 'rgba(255,120,230,0.12)' : 'rgba(255,240,190,0.06)';
     if (this.bigDisk(X, Y, ve.r)) ctx.fill();
-    this.drawBilayer(ve.x, ve.y, ve.r, alive ? 'rgba(255,190,245,0.95)' : 'rgba(245,232,180,0.95)', alive ? 'rgba(255,170,240,0.35)' : 'rgba(235,215,160,0.35)');
+    this.drawBilayer(ve.x, ve.y, ve.r, alive ? 'rgba(255,190,245,0.95)' : 'rgba(245,232,180,0.95)', alive ? 'rgba(255,170,240,0.35)' : 'rgba(235,215,160,0.35)',
+      ph, null, { seed: ve.id * 2654435761 >>> 0, phHead: 'rgba(150,205,255,0.95)' });
     if (rp < 6) return;
     // Contents, at true size inside the membrane.
     const inner = ve.r - DIM.bilayer * NM;
+    const core = protoRibosome(ve, m);
     for (const p of ve.polys) {
       this.placeInternal(p, ve);
-      if (this.inView(p.x, p.y, 0.05)) this.drawPolymer(p, p.x, p.y, p._drawFa);
+      if (p._ipeel) this.peelOut(p);
+      if (!this.inView(p.x, p.y, 0.05)) continue;
+      if (p === core) this.drawProtoRibosome(p, p.x, p.y, p._drawFa);
+      this.drawPolymer(p, p.x, p.y, p._drawFa);
     }
     if (molecular) {
       // Free nucleotides waiting in the protocell's internal pool.
@@ -953,12 +1064,80 @@ export class Renderer {
           if (this.inView(px, py, 3 * NM)) this.drawMonomer(px, py, t, r.next() * TAU + this.time * 0.03);
         }
       }
+      for (const pep of peptides(ve, m)) {
+        const at = this.peptideAt(ve, pep, inner, core);
+        if (this.inView(at.x, at.y, 6 * NM)) this.drawPeptide(pep.seq, at.x, at.y, at.ang);
+      }
     }
+  }
+
+  // Where a peptide is: some cling to an RNA strand, the rest drift slowly through the protocell.
+  peptideAt(ve, pep, inner, core) {
+    const t = this.time, k = pep.k, id = ve.id;
+    const host = core && k === 0 ? core : pep.onRNA && ve.polys.length ? ve.polys[k % ve.polys.length] : null;
+    if (host && host.x !== undefined) {
+      const a = rand01(id, k * 7 + 3) * TAU + Math.sin(t * 0.02 + k) * 0.3, d = (2.5 + (host.seq.length * DIM.ntRise) / 3) * NM;
+      return { x: host.x + Math.cos(a) * d, y: host.y + Math.sin(a) * d, ang: a + Math.PI / 2 };
+    }
+    const a = rand01(id, k * 7 + 1) * TAU + t * 0.0021 * (k % 2 ? 1 : -1), rr = (0.25 + 0.55 * rand01(id, k * 7 + 2)) * inner;
+    return { x: ve.x + Math.cos(a) * rr, y: ve.y + Math.sin(a) * rr, ang: rand01(id, k * 7 + 4) * TAU + Math.sin(t * 0.017 + k) * 0.8 };
+  }
+
+  // A short peptide: amino acids (beads, 0.38 nm apart along the chain) in a gentle zigzag.
+  drawPeptide(seq, x, y, ang) {
+    const ctx = this.ctx;
+    if (this.pxnm < 2.5) return;
+    this.nmFrame(x, y, ang);
+    const L = seq.length, step = 0.38 * 1.6; // (drawn a little stretched so the beads read as a chain)
+    const pts = seq.map((_, i) => [(i - (L - 1) / 2) * step, (i % 2 ? 0.18 : -0.18)]);
+    ctx.strokeStyle = 'rgba(230,220,200,0.8)';
+    ctx.lineWidth = 0.12;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.stroke();
+    for (let i = 0; i < L; i++) {
+      ctx.fillStyle = aaColor(seq[i]);
+      ctx.beginPath(); ctx.arc(pts[i][0], pts[i][1], 0.3, 0, TAU); ctx.fill();
+    }
+    // Three-letter names once there is room (screen space, like the RNA bases).
+    const T = ctx.getTransform(), labels = this.pxnm >= 30 ? pts.map(([px, py]) => T.transformPoint({ x: px, y: py })) : [];
+    ctx.restore();
+    labels.forEach((pt, i) => this.screenText(seq[i], pt.x, pt.y, 8));
+  }
+
+  // A proto-ribosome: the protocell's best ribozyme, grown into a larger folded RNA core with a
+  // pocket where two amino acids are being joined into a peptide. Drawn as a pale halo of extra
+  // folded RNA around the strand, with the pocket and a growing chain.
+  drawProtoRibosome(p, x, y, ang) {
+    const ctx = this.ctx, R = Math.max(5, (p.seq.length * DIM.ntRise) / 2 + 2.5); // nm
+    if (R * this.pxnm < 4) return;
+    this.nmFrame(x, y, ang);
+    ctx.fillStyle = 'rgba(255,150,230,0.10)';
+    ctx.beginPath(); ctx.ellipse(0, 0, R, R * 0.75, 0, 0, TAU); ctx.fill();
+    // Two interlocking RNA hairpins forming the pocket (the symmetric core of the modern ribosome).
+    ctx.strokeStyle = 'rgba(255,170,235,0.75)';
+    ctx.lineWidth = 0.25;
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(sgn * R * 0.9, -R * 0.35);
+      ctx.bezierCurveTo(sgn * R * 0.3, -R * 0.75, sgn * R * 0.05, -R * 0.15, sgn * R * 0.25, R * 0.1);
+      ctx.bezierCurveTo(sgn * R * 0.45, R * 0.4, sgn * R * 0.9, R * 0.5, sgn * R * 0.95, R * 0.1);
+      ctx.stroke();
+    }
+    // The catalytic pocket, with two amino acids being joined (pulsing as bonds form).
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 0.25);
+    ctx.fillStyle = `rgba(255,229,138,${0.25 + 0.35 * pulse})`;
+    ctx.beginPath(); ctx.arc(0, R * 0.05, 1.2, 0, TAU); ctx.fill();
+    ctx.fillStyle = aaColor('Gly'); ctx.beginPath(); ctx.arc(-0.45, R * 0.05, 0.3, 0, TAU); ctx.fill();
+    ctx.fillStyle = aaColor('Ala'); ctx.beginPath(); ctx.arc(0.45 * (0.6 + 0.4 * pulse), R * 0.05, 0.3, 0, TAU); ctx.fill();
+    ctx.restore();
   }
 
   // A lipid bilayer of radius R; individual lipids are drawn once they are resolvable,
   // and only along the arc that is on screen.
-  drawBilayer(x, y, R, head, tail, twoTails = false, cell = null) {
+  // twoTails: true (phospholipids), false (fatty acids), or the share of phospholipids in a mixed
+  // membrane (opt.seed picks which lipids, opt.phHead colours their phosphate heads).
+  drawBilayer(x, y, R, head, tail, twoTails = false, cell = null, opt = null) {
     const ctx = this.ctx, v = this.v, t = DIM.bilayer * NM;
     const X = x - this.cam.x, Y = y - this.cam.y;
     if (DIM.lipidSpacing * this.pxnm < 2.5) {
@@ -982,19 +1161,27 @@ export class Renderer {
     ctx.lineWidth = t * 0.55;
     ctx.beginPath(); ctx.arc(X, Y, R - t / 2, mid - phi, mid + phi); ctx.stroke();
     const da = (DIM.lipidSpacing * NM) / R;
-    const n = Math.min(8000, Math.ceil((2 * phi) / da));
+    // Lipids sit at fixed angles (multiples of da), so they stay put as the view moves.
+    const kb = Math.floor((mid - phi) / da);
+    const n = Math.min(8000, Math.ceil((2 * phi) / da) + 1);
     const hr = DIM.lipidHead * NM, ro = R - hr, ri = R - t + hr;
-    ctx.fillStyle = head;
-    ctx.beginPath();
+    const frac = twoTails === true ? 1 : twoTails || 0, seed = opt && opt.seed ? opt.seed : 0;
+    const mixed = frac > 0 && frac < 1;
+    // Which lipids (outer leaflet 2k, inner 2k + 1) are phospholipids.
+    const isPh = (j) => (frac >= 1 ? true : frac <= 0 ? false : hash32(seed, j) / 4294967296 < frac);
+    const heads = new Path2D(), phHeads = mixed ? new Path2D() : heads;
     for (let k = 0; k <= n; k++) {
-      const a = mid - phi + k * da, b = a + da / 2;
-      const wob = Math.sin(this.time * 0.6 + k * 1.37) * 0.12 * NM; // thermal wiggle
+      const kk = kb + k, a = kk * da, b = a + da / 2;
+      const wob = Math.sin(this.time * 0.6 + kk * 1.37) * 0.12 * NM; // thermal wiggle
       const ox = X + Math.cos(a) * (ro + wob), oy = Y + Math.sin(a) * (ro + wob);
       const ix = X + Math.cos(b) * (ri - wob), iy = Y + Math.sin(b) * (ri - wob);
-      ctx.moveTo(ox + hr, oy); ctx.arc(ox, oy, hr, 0, TAU);
-      ctx.moveTo(ix + hr, iy); ctx.arc(ix, iy, hr, 0, TAU);
+      const po = isPh(2 * kk) ? phHeads : heads, pi = isPh(2 * kk + 1) ? phHeads : heads;
+      po.moveTo(ox + hr, oy); po.arc(ox, oy, hr, 0, TAU);
+      pi.moveTo(ix + hr, iy); pi.arc(ix, iy, hr, 0, TAU);
     }
-    ctx.fill();
+    ctx.fillStyle = head;
+    ctx.fill(heads);
+    if (mixed) { ctx.fillStyle = (opt && opt.phHead) || head; ctx.fill(phHeads); }
     if (cell) {
       // Proteins set into the membrane (channels, pumps, transporters, receptors, ATP synthase).
       const sp = membraneProteinSpacing(R), k0 = Math.floor((mid - phi) / sp), k1 = Math.ceil((mid + phi) / sp);
@@ -1021,13 +1208,16 @@ export class Renderer {
       ctx.lineWidth = 0.13 * NM;
       ctx.beginPath();
       const tl = DIM.lipidTail * NM;
+      // Phospholipids have two tails; prebiotic fatty acids have one.
+      const one = [0], two = [-0.22 * NM / R, 0.22 * NM / R];
       for (let k = 0; k <= n; k++) {
-        const a = mid - phi + k * da, b = a + da / 2;
-        // Phospholipids have two tails; prebiotic fatty acids have one.
-        const offs = twoTails ? [-0.22 * NM / R, 0.22 * NM / R] : [0];
-        for (const o of offs) {
-          const c1 = Math.cos(a + o), s1 = Math.sin(a + o), c2 = Math.cos(b + o), s2 = Math.sin(b + o);
+        const kk = kb + k, a = kk * da, b = a + da / 2;
+        for (const o of isPh(2 * kk) ? two : one) {
+          const c1 = Math.cos(a + o), s1 = Math.sin(a + o);
           ctx.moveTo(X + c1 * (ro - hr), Y + s1 * (ro - hr)); ctx.lineTo(X + c1 * (ro - hr - tl), Y + s1 * (ro - hr - tl));
+        }
+        for (const o of isPh(2 * kk + 1) ? two : one) {
+          const c2 = Math.cos(b + o), s2 = Math.sin(b + o);
           ctx.moveTo(X + c2 * (ri + hr), Y + s2 * (ri + hr)); ctx.lineTo(X + c2 * (ri + hr + tl), Y + s2 * (ri + hr + tl));
         }
       }

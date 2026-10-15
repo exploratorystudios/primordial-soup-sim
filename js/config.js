@@ -44,6 +44,7 @@ export const CFG = {
   VES_NUCLEATE: 8,
   VES_SPLIT: 34,
   VES_POOL: 60,
+  VES_NT_REACH: 1.5,        // how far beyond its membrane a protocell draws in nucleotides
   VES_MAX_POLY: 14,
   VES_LIPID_LOSS: 0.012,
   VES_BURST: 0.00025,
