@@ -51,10 +51,13 @@ function setSpeed(i) {
 }
 function speedLabel() {
   const s = SPEEDS[speedIdx];
-  const set = s === Infinity ? 'max' : s < 1 ? `1 tick / ${Math.round(1 / s)} frames` : `${s} / frame`;
-  // When the setting is more than the CPU can do, say what it actually achieves.
+  const set = s === Infinity ? 'max' : s < 1 ? `1 tick/${Math.round(1 / s)} fr` : `${s}/frame`;
+  // When the setting is more than the CPU can do, say what it actually achieves. (Kept to one line of
+  // fixed width: if the label wrapped, the buttons below jumped and clicks on them could miss.)
   const capped = s >= 1 && running && tps && tps < s * 50;
-  $('speed-val').textContent = capped ? `${set} (≈${Math.round(tps).toLocaleString()}/s)` : set;
+  const el = $('speed-val'), rate = Math.round(tps).toLocaleString();
+  el.textContent = capped ? `${set} · ${rate}/s` : set;
+  el.title = s === Infinity ? `As fast as possible: ≈${rate} ticks per second` : s < 1 ? `One tick every ${Math.round(1 / s)} frames` : `${s} ticks per frame${capped ? `; the CPU manages ≈${rate} ticks per second` : ''}`;
 }
 // ?speed= in ticks per frame (0.01 … 250, or max).
 setSpeed(params.has('speed') ? speedIndexOf(params.get('speed') === 'max' ? Infinity : +params.get('speed') || SPEEDS[0]) : speedIdx);
