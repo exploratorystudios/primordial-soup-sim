@@ -201,6 +201,7 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!drag) return;
+  if (e.buttons === 0) { endDrag(); return; } // the button was released somewhere we didn't hear about
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   drag.moved += Math.abs(dx) + Math.abs(dy);
   if (drag.moved > 4) {
@@ -218,8 +219,13 @@ canvas.addEventListener('pointerup', (e) => {
     const r = canvas.getBoundingClientRect();
     pick(renderer.screenToWorld(e.clientX - r.left, e.clientY - r.top));
   }
-  drag = null;
+  endDrag();
 });
+// A drag must always end, even if the pointer is released outside the window or the browser takes it over.
+function endDrag() { drag = null; canvas.classList.remove('dragging'); }
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('lostpointercapture', endDrag);
+window.addEventListener('blur', endDrag);
 
 // Keep the selection current. When the selected thing turns into something else (a molecule built
 // into a strand, a protocell dividing or becoming a cell, a cell swallowed, a virus infecting),
@@ -286,6 +292,7 @@ function chase(sel, dt) {
   const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 }, p = sel.pan || (sel.pan = { x: 0, y: 0 });
   if (!p.hold) { const k = Math.exp(-dt / 0.35); p.x *= k; p.y *= k; } // ease into the centre
   const v = viewW(); // the pan is a fraction of the view, so zooming keeps the subject where it is on screen
+  clampPan(p, sel);
   renderer.cam.x = t.x + o.x + p.x * v;
   renderer.cam.y = t.y + o.y + p.y * v;
 }
@@ -387,7 +394,18 @@ function reframe() {
   const t = followTarget(s);
   const o = s.offset || { x: 0, y: 0 };
   const v = viewW();
-  s.pan = { x: (renderer.cam.x - t.x - o.x) / v, y: (renderer.cam.y - t.y - o.y) / v, hold: true }; // stays where you put it
+  s.pan = clampPan({ x: (renderer.cam.x - t.x - o.x) / v, y: (renderer.cam.y - t.y - o.y) / v, hold: true }, s); // stays where you put it
+  renderer.cam.x = t.x + o.x + s.pan.x * v; renderer.cam.y = t.y + o.y + s.pan.y * v;
+}
+
+// The followed thing can be dragged anywhere on screen, but not off it (you'd be following
+// something you can't see).
+function clampPan(p, s) {
+  const cv = renderer.canvas, v = viewW(), aspect = cv.height / cv.width;
+  const r = ((s.obj && s.obj.r) || 0) / v; // keep all of it in view (most of it, if it's nearly screen-sized)
+  const mx = Math.max(0.1, 0.5 - 0.02 - r), my = Math.max(0.1 * aspect, 0.5 * aspect - 0.02 - r);
+  p.x = Math.max(-mx, Math.min(mx, p.x)); p.y = Math.max(-my, Math.min(my, p.y));
+  return p;
 }
 
 // Up one level (inspector button or Esc); keeps following and keeps the view steady.
