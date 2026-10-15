@@ -1,0 +1,124 @@
+Replaying 8 worlds × 80,000 ticks on 8 cores…
+  … 6% overall (0/8 worlds finished, 30s elapsed, ~450s left)
+  … 11% overall (0/8 worlds finished, 60s elapsed, ~473s left)
+  … 16% overall (0/8 worlds finished, 90s elapsed, ~486s left)
+  … 20% overall (0/8 worlds finished, 120s elapsed, ~480s left)
+  … 24% overall (0/8 worlds finished, 150s elapsed, ~473s left)
+  … 28% overall (0/8 worlds finished, 180s elapsed, ~460s left)
+  … 32% overall (0/8 worlds finished, 210s elapsed, ~443s left)
+  … 36% overall (0/8 worlds finished, 240s elapsed, ~434s left)
+  … 40% overall (0/8 worlds finished, 270s elapsed, ~410s left)
+  … 44% overall (0/8 worlds finished, 300s elapsed, ~386s left)
+  … 48% overall (0/8 worlds finished, 330s elapsed, ~365s left)
+  … 51% overall (0/8 worlds finished, 360s elapsed, ~351s left)
+  … 54% overall (0/8 worlds finished, 390s elapsed, ~336s left)
+  … 57% overall (0/8 worlds finished, 420s elapsed, ~318s left)
+  … 60% overall (0/8 worlds finished, 450s elapsed, ~304s left)
+  … 63% overall (0/8 worlds finished, 480s elapsed, ~288s left)
+  … 65% overall (0/8 worlds finished, 510s elapsed, ~271s left)
+  seed 9002 done (535s)
+  … 68% overall (1/8 worlds finished, 540s elapsed, ~256s left)
+  … 70% overall (1/8 worlds finished, 570s elapsed, ~244s left)
+  … 71% overall (1/8 worlds finished, 600s elapsed, ~242s left)
+  … 73% overall (1/8 worlds finished, 630s elapsed, ~235s left)
+  … 74% overall (1/8 worlds finished, 660s elapsed, ~227s left)
+  … 76% overall (1/8 worlds finished, 690s elapsed, ~215s left)
+  … 78% overall (1/8 worlds finished, 720s elapsed, ~209s left)
+  seed 9008 done (740s)
+  … 78% overall (2/8 worlds finished, 750s elapsed, ~206s left)
+  … 80% overall (2/8 worlds finished, 780s elapsed, ~199s left)
+  … 81% overall (2/8 worlds finished, 810s elapsed, ~195s left)
+  seed 9003 done (829s)
+  … 82% overall (3/8 worlds finished, 840s elapsed, ~190s left)
+  … 82% overall (3/8 worlds finished, 870s elapsed, ~189s left)
+  seed 9005 done (887s)
+  … 83% overall (4/8 worlds finished, 900s elapsed, ~179s left)
+  … 84% overall (4/8 worlds finished, 930s elapsed, ~180s left)
+  … 84% overall (4/8 worlds finished, 960s elapsed, ~186s left)
+  … 85% overall (4/8 worlds finished, 990s elapsed, ~179s left)
+  … 85% overall (4/8 worlds finished, 1020s elapsed, ~184s left)
+  … 86% overall (4/8 worlds finished, 1050s elapsed, ~176s left)
+  … 86% overall (4/8 worlds finished, 1080s elapsed, ~181s left)
+  … 86% overall (4/8 worlds finished, 1110s elapsed, ~182s left)
+  … 87% overall (4/8 worlds finished, 1140s elapsed, ~172s left)
+  … 87% overall (4/8 worlds finished, 1170s elapsed, ~177s left)
+  … 87% overall (4/8 worlds finished, 1200s elapsed, ~181s left)
+  … 87% overall (4/8 worlds finished, 1230s elapsed, ~181s left)
+  … 88% overall (4/8 worlds finished, 1260s elapsed, ~170s left)
+  … 88% overall (4/8 worlds finished, 1290s elapsed, ~174s left)
+  … 88% overall (4/8 worlds finished, 1320s elapsed, ~178s left)
+  … 88% overall (4/8 worlds finished, 1350s elapsed, ~177s left)
+  … 89% overall (4/8 worlds finished, 1380s elapsed, ~169s left)
+  … 89% overall (4/8 worlds finished, 1410s elapsed, ~173s left)
+  … 90% overall (4/8 worlds finished, 1440s elapsed, ~166s left)
+  … 90% overall (4/8 worlds finished, 1470s elapsed, ~163s left)
+  … 90% overall (4/8 worlds finished, 1500s elapsed, ~161s left)
+  … 91% overall (4/8 worlds finished, 1530s elapsed, ~158s left)
+  … 91% overall (4/8 worlds finished, 1560s elapsed, ~155s left)
+  … 92% overall (4/8 worlds finished, 1590s elapsed, ~147s left)
+  … 92% overall (4/8 worlds finished, 1620s elapsed, ~149s left)
+  … 92% overall (4/8 worlds finished, 1650s elapsed, ~140s left)
+  … 92% overall (4/8 worlds finished, 1680s elapsed, ~142s left)
+  … 93% overall (4/8 worlds finished, 1710s elapsed, ~126s left)
+  … 93% overall (4/8 worlds finished, 1740s elapsed, ~128s left)
+  … 93% overall (4/8 worlds finished, 1770s elapsed, ~124s left)
+  … 93% overall (4/8 worlds finished, 1800s elapsed, ~126s left)
+  … 94% overall (4/8 worlds finished, 1830s elapsed, ~116s left)
+  … 95% overall (4/8 worlds finished, 1860s elapsed, ~104s left)
+  … 95% overall (4/8 worlds finished, 1890s elapsed, ~106s left)
+  seed 9004 done (1920s)
+  … 95% overall (5/8 worlds finished, 1920s elapsed, ~101s left)
+  … 95% overall (5/8 worlds finished, 1950s elapsed, ~96s left)
+  … 95% overall (5/8 worlds finished, 1980s elapsed, ~97s left)
+  … 96% overall (5/8 worlds finished, 2010s elapsed, ~85s left)
+  seed 9007 done (2036s)
+  … 96% overall (6/8 worlds finished, 2040s elapsed, ~79s left)
+  … 96% overall (6/8 worlds finished, 2070s elapsed, ~81s left)
+  … 96% overall (6/8 worlds finished, 2100s elapsed, ~82s left)
+  … 97% overall (6/8 worlds finished, 2130s elapsed, ~69s left)
+  … 97% overall (6/8 worlds finished, 2160s elapsed, ~70s left)
+  … 97% overall (6/8 worlds finished, 2190s elapsed, ~71s left)
+  … 97% overall (6/8 worlds finished, 2220s elapsed, ~64s left)
+  … 98% overall (6/8 worlds finished, 2250s elapsed, ~58s left)
+  … 98% overall (6/8 worlds finished, 2280s elapsed, ~58s left)
+  … 98% overall (6/8 worlds finished, 2310s elapsed, ~52s left)
+  … 98% overall (6/8 worlds finished, 2340s elapsed, ~52s left)
+  … 98% overall (6/8 worlds finished, 2370s elapsed, ~45s left)
+  … 98% overall (6/8 worlds finished, 2400s elapsed, ~38s left)
+  … 98% overall (6/8 worlds finished, 2430s elapsed, ~39s left)
+  … 98% overall (6/8 worlds finished, 2460s elapsed, ~39s left)
+  seed 9001 done (2470s)
+  … 99% overall (7/8 worlds finished, 2490s elapsed, ~24s left)
+  … 99% overall (7/8 worlds finished, 2520s elapsed, ~24s left)
+  … 99% overall (7/8 worlds finished, 2550s elapsed, ~24s left)
+  … 99% overall (7/8 worlds finished, 2580s elapsed, ~16s left)
+  … 99% overall (7/8 worlds finished, 2610s elapsed, ~16s left)
+  … 100% overall (7/8 worlds finished, 2640s elapsed, ~8s left)
+  … 100% overall (7/8 worlds finished, 2670s elapsed, ~8s left)
+  seed 9006 done (2696s)
+
+seed   Replic Protoc Living Protei DNA ge Photos Viruse Great  Eukary Sexual Multic Comple   cells  sp  euk viru  era
+9001     0.1k   0.3k   1.2k   7.6k   4.9k   4.2k   3.4k  31.4k  40.4k  58.0k    –      –      5980 261  134    3  Proterozoic: Eukaryotes
+9002     0.1k   0.2k   1.3k  33.3k  11.6k    –     6.5k    –      –      –      –      –       567   6    0 1214  Archean: DNA & Proteins
+9003     0.1k   0.4k   2.5k  25.5k  26.0k  24.0k   4.7k  72.4k    –      –      –      –      1957  32    0  414  Great Oxidation
+9004     0.1k   0.2k   0.4k  12.6k  44.4k  16.4k   5.9k  45.4k  47.0k    –      –      –      3776  74  384  266  Proterozoic: Eukaryotes
+9005     0.1k   0.2k   1.8k  26.0k  42.1k  21.5k   7.8k  67.3k    –      –      –      –      4292  10    0  808  Great Oxidation
+9006     0.2k   0.2k   1.4k   7.7k  24.3k   6.5k   8.0k  29.4k  41.3k  58.2k  60.5k    –      5984 317  667    0  Multicellular Life
+9007     0.1k   0.4k   1.0k  13.8k  26.9k  15.1k   6.1k  47.4k  52.4k  69.6k  72.2k    –      5984  83   18    5  Multicellular Life
+9008     0.1k   0.1k   0.7k  26.6k  19.2k  12.0k   5.6k    –      –      –      –      –       764  31    0   70  Archean: DNA & Proteins
+
+How often each stage happened (and its median time):
+  ✓ Replicator               100%  (want ≥ 100%)   median 135 ticks
+  ✓ Protocell                100%  (want ≥ 100%)   median 239 ticks
+  ✓ Living cell              100%  (want ≥ 100%)   median 1,270 ticks
+  ✓ Proteins / genetic code  100%  (want ≥ 90%)   median 25,500 ticks
+  ✓ DNA genome               100%  (want ≥ 80%)   median 26,000 ticks
+  ✓ Photosynthesis            88%  (want ≥ 80%)   median 15,100 ticks
+  ✓ Viruses                  100%  (want ≥ 80%)   median 6,144 ticks
+  ✓ Great Oxidation           75%  (want ≥ 60%)   median 47,400 ticks
+  ✓ Eukaryote                 50%  (want ≥ 50%)   median 46,998 ticks
+  ✗ Sexual reproduction       38%  (want ≥ 40%)   median 58,172 ticks
+  ✗ Multicellular             25%  (want ≥ 40%)   median 72,200 ticks
+  ✗ Complex organism           0%  (want ≥ 20%)   median —
+
+Some stages emerge less often than expected (see ✗).

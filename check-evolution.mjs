@@ -2,6 +2,7 @@
 // Doubles as a regression check that every evolutionary stage still emerges after a change.
 //
 //   node check-evolution.mjs [--seeds 1-8] [--ticks 60000] [--jobs 6] [--cfg '{"PRED_P":0.4}'] [--md report.md]
+//                            [--out results.jsonl]   (each world's full result, saved as soon as it finishes)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -124,7 +125,7 @@ await new Promise((done) => {
       cp.on('close', () => {
         running--;
         progress.set(seed, ticks);
-        try { const r = JSON.parse(out.trim().split('\n').pop()); results.push(r); process.stdout.write(`  seed ${seed} done (${r.secs.toFixed(0)}s)\n`); }
+        try { const r = JSON.parse(out.trim().split('\n').pop()); results.push(r); process.stdout.write(`  seed ${seed} done (${r.secs.toFixed(0)}s)\n`); if (args.out) fs.appendFileSync(args.out, JSON.stringify(r) + '\n'); }
         catch { results.push({ seed, error: true, ms: {}, final: {} }); console.log(`  seed ${seed} FAILED`); }
         if (next >= seeds.length && running === 0) done(); else launch();
       });
