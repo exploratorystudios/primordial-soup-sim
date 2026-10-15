@@ -11,7 +11,7 @@ export const CFG = {
   VENT_GLOW: 0.3,         // faint thermal light near vents (anoxygenic photosynthesis stepping stone)
   CHEM_DIFF: 0.25, CHEM_DECAY: 0.0015, CHEM_HALF: 4,
   ORG_DIFF: 0.15, ORG_DECAY: 0.0006,
-  OXY_DIFF: 0.3, OXY_DECAY: 0.0005, // (was 0.0015: oxygen's half-life ~460 ticks, too short for it to build up) OXY_REACT: 0.01,
+  OXY_DIFF: 0.3, OXY_DECAY: 0.0005, OXY_REACT: 0.01, // (OXY_DECAY was 0.0015: a ~460-tick half-life, too short for oxygen to build up)
   NUT_INIT: 0.3,           // conserved limiting nutrient (think phosphate) per grid cell
   NUT_DIFF: 0.3, NUT_BURIAL: 0.0004,
   VENT_NUT: 0.1,          // minerals from vents
