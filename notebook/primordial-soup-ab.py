@@ -7,19 +7,18 @@
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # Why do some worlds never reach the Great Oxidation? Oxygen's half-life is ~460 ticks (OXY_DECAY 0.0015),
-    # but a night (sun down to 30%) lasts ~2,000 of the 4,000-tick day: each night wipes out ~95% of the oxygen
-    # made by day, so it rarely accumulates. (With constant daylight, seed 353204 kept its oxygen once it rose.)
-    "baseline":   {},
-    "short_days": {"DAY_LENGTH": 1000},          # nights ~1 oxygen half-life: a dip, not a wipe-out
-    "slow_o2":    {"OXY_DECAY": 0.0005},         # oxygen lasts 3x longer (~1,400-tick half-life)
-    "steady_sun": {"DAY_SWING": 0},              # reference: same total light, no nights
+    # Oxygen breaks down fast (OXY_DECAY 0.0015: ~460-tick half-life), so patchy photosynthesis rarely keeps it up.
+    # In run sun2, 3x longer-lived oxygen raised the Great Oxidation from 23% to 56% of worlds (shorter days did
+    # not help). Confirm, and check the dose: does 2x give most of the gain without the dip in complex life?
+    "baseline": {},
+    "o2_x2":    {"OXY_DECAY": 0.00075},   # ~900-tick half-life
+    "o2_x3":    {"OXY_DECAY": 0.0005},    # ~1,400-tick half-life (sun2's slow_o2)
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "sun2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "o2a"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 
 
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
