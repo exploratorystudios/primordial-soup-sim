@@ -20,6 +20,9 @@ function unb64(str, Type) {
   return new Type(bytes.buffer, 0, bytes.byteLength / Type.BYTES_PER_ELEMENT);
 }
 
+// Viruses are plain records; leave out the renderer's notes on them (underscored, e.g. _esc points back
+// at an animation) and the previous-tick positions used for smoothing.
+const virusOut = (v) => { const o = {}; for (const k in v) if (k[0] !== '_' && k !== 'x0' && k !== 'y0') o[k] = v[k]; return o; };
 const polyOut = (p) => ({ id: p.id, x: p.x, y: p.y, ang: p.ang, seq: p.seq, prog: p.prog, copy: p.copy });
 
 export function serialize(w) {
@@ -47,7 +50,7 @@ export function serialize(w) {
       species: [...L.species.values()].map((s) => ({ ...s, rep: b64(s.rep) })),
       organisms: L.organisms, stamp: L.stamp,
     },
-    viruses: { list: w.viruses.list.map((v) => ({ ...v, x0: undefined, y0: undefined })), nextId: w.viruses.nextId, lineages: w.viruses.lineages, stats: w.viruses.stats },
+    viruses: { list: w.viruses.list.map(virusOut), nextId: w.viruses.nextId, lineages: w.viruses.lineages, stats: w.viruses.stats },
   };
 }
 

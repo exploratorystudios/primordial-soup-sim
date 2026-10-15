@@ -3,9 +3,10 @@ import { World } from './world.js';
 import { CFG } from './config.js';
 import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
-import { fovFor, centreOf, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel } from './parts.js';
+import { fovFor, centreOf, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel, children, organismOf, molecule } from './parts.js';
 import { Cell } from './life.js';
 import { Story } from './story.js';
+import { Rewind } from './rewind.js';
 import { saveToFile, loadFromFile } from './persist.js';
 
 // Ticks per frame. Below 1 the view interpolates between ticks. Max runs the simulation as fast as
@@ -44,7 +45,7 @@ function speedLabel() {
   const set = s === Infinity ? 'max' : s < 1 ? `1 tick / ${Math.round(1 / s)} frames` : `${s} / frame`;
   // When the setting is more than the CPU can do, say what it actually achieves.
   const capped = s >= 1 && running && tps && tps < s * 50;
-  $('speed-val').textContent = capped ? `${set} · ≈${Math.round(tps).toLocaleString()} ticks/s` : set;
+  $('speed-val').textContent = capped ? `${set} (≈${Math.round(tps).toLocaleString()}/s)` : set;
 }
 // ?speed= in ticks per frame (0.01 … 250, or max).
 setSpeed(params.has('speed') ? speedIndexOf(params.get('speed') === 'max' ? Infinity : +params.get('speed') || SPEEDS[0]) : speedIdx);
@@ -52,6 +53,7 @@ $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.
 
 function newWorld(s) {
   if (typeof story !== 'undefined') story.stop();
+  stopRewind(); rewind.clear();
   seed = s;
   world = new World(seed);
   ui.reset();
@@ -60,6 +62,8 @@ function newWorld(s) {
 }
 
 let seeking = null; // { from: milestone count, start: tick } while jumping to the next milestone
+const rewind = new Rewind();
+let rewinding = null; // { t: the tick being shown (fractional), spec: what was selected, fresh } while playing backwards
 let lastNow = performance.now();
 // The tour (story mode) swaps in replayed worlds and drives the clock, but leaves the camera free.
 const story = new Story({
@@ -68,8 +72,8 @@ const story = new Story({
   opts,
   ui,
   renderer,
-  setWorld(w) { world = w; ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null; flight = null; acc = 0; alpha = 1; },
-  setRunning(b) { running = b; $('btn-play').textContent = running ? 'Pause' : 'Play'; },
+  setWorld(w) { stopRewind(); rewind.clear(); world = w; ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null; flight = null; acc = 0; alpha = 1; },
+  setRunning(b) { running = b; playLabel(); },
   setSpeed: (v) => setSpeed(speedIndexOf(v)),
   setOverlay(o) { opts.overlay = o; $('overlay').value = o; },
   follow: storyFollow,
@@ -92,7 +96,10 @@ function frameStep() {
       if (world.milestones.length > seeking.from || world.t - seeking.start > 400000) { stopSeek(); break; }
     }
     alpha = 1;
+    rewind.record(world, performance.now() - t0);
     if (seeking) $('btn-seek').textContent = `⏭ Seeking… tick ${world.t.toLocaleString()}`;
+  } else if (rewinding) {
+    rewindFrame();
   } else if (running) {
     acc += SPEEDS[speedIdx];
     const t0 = performance.now(), budget = simBudget(SPEEDS[speedIdx]);
@@ -101,6 +108,7 @@ function frameStep() {
     if (acc > 1) acc = 0; // (also what keeps Max from piling up)
     alpha = SPEEDS[speedIdx] >= 1 ? 1 : acc;
     world.smooth = SPEEDS[speedIdx] < 1; // only pay for in-between frames when they're visible
+    rewind.record(world, performance.now() - t0);
   }
   if (now - tpsSince > 500) { tps = (tpsTicks * 1000) / (now - tpsSince); tpsTicks = 0; tpsSince = now; speedLabel(); }
   // Draw everything partway between ticks (the simulation itself never sees these positions).
@@ -131,8 +139,141 @@ function frameStep() {
 }
 
 // ---------------------------------------------------------------- controls
-$('btn-play').onclick = () => { running = !running; $('btn-play').textContent = running ? 'Pause' : 'Play'; };
-$('btn-step').onclick = () => { world.step(); alpha = 1; };
+function playLabel() {
+  $('btn-play').textContent = running || rewinding ? 'Pause' : 'Play';
+  $('btn-rew').classList.toggle('active', !!rewinding);
+}
+$('btn-play').onclick = () => {
+  if (rewinding) stopRewind(); // pauses
+  else running = !running;
+  playLabel();
+};
+$('btn-step').onclick = () => { stopRewind(); world.step(); alpha = 1; };
+$('btn-rew').onclick = () => { if (rewinding) stopRewind(); else startRewind(); };
+
+// ---------------------------------------------------------------- rewind
+// Plays the recent past backwards at the current speed. Below one tick per frame it is smooth (drawn
+// between ticks, like playing forward); up to 20 ticks per frame it steps back tick by tick; faster
+// than that it hops between the saved moments, which needs no replaying at all.
+function startRewind() {
+  if (story.active) { ui.toast('The tour has its own rewind (◀◀ and the timeline)', world.t); return; }
+  stopSeek();
+  if (!(rewind.oldest() < world.t)) { ui.toast('Nothing to rewind yet: let the world run for a moment first', world.t); return; }
+  running = false;
+  rewinding = { t: world.t - 1 + alpha, spec: selSpec(ui.selected), fresh: true };
+  playLabel();
+}
+function stopRewind() {
+  if (!rewinding) return;
+  rewinding = null;
+  rewind.dropFine();
+  acc = 0;
+  playLabel();
+}
+function rewindFrame() {
+  const s = SPEEDS[speedIdx], v = s === Infinity ? 250 : s, oldest = rewind.oldest();
+  const r = rewinding;
+  r.t -= v;
+  let end = false;
+  if (r.t <= oldest) { r.t = oldest; end = true; }
+  const k = Math.floor(r.t), smooth = v < 1;
+  let w = null;
+  if (v >= 20) {
+    const q = rewind.saveAt(k);
+    if (q && (q.t !== world.t || r.fresh)) w = rewind.coarse(k);
+  } else if (r.fresh || world.t !== (smooth ? k + 1 : k)) w = rewind.exact(k, smooth);
+  r.fresh = false;
+  if (w) swapWorld(w, r.spec);
+  alpha = smooth ? Math.min(1, Math.max(0, r.t - k)) : 1;
+  if (!smooth) r.t = Math.min(r.t, world.t); // (hopping between saves: carry on from where it landed)
+  if (end) {
+    stopRewind();
+    ui.toast(`Rewound as far as the saved history goes (tick ${oldest.toLocaleString()})`, world.t);
+  }
+}
+
+// Put an earlier version of the world on screen, keeping what was selected (found again by id) and
+// the camera on it.
+function swapWorld(w, spec) {
+  world = w;
+  ui.reset();
+  ui.seenLogs = w.logs.length;
+  opts.selected = null;
+  flight = null;
+  const s = spec && resolveSpec(spec, w);
+  if (!s) return;
+  ui.select(world, s);
+  s.follow = followOn;
+  if (followOn) {
+    startFollow(s);
+    if (spec.pan) s.pan = { ...spec.pan };
+    const t = followTarget(s), o = s.offset;
+    renderer.cam.x = t.x + o.x + s.pan.x; renderer.cam.y = t.y + o.y + s.pan.y;
+  }
+}
+
+// What is selected, described so it can be found again in another copy of the world.
+function selSpec(s) {
+  if (!s) return null;
+  const chain = [];
+  for (let q = s; q; q = q.parent) chain.unshift(q);
+  const levels = chain.map((q, i) => {
+    const L = { kind: q.kind, label: crumbLabel(q) };
+    if (q.st) L.mid = q.st.mid;
+    else if (q.kind === 'organism') L.members = q.members().map((c) => c.id);
+    else if (q.obj && q.obj.id !== undefined) { L.id = q.obj.id; L.parentId = q.obj.parentId; }
+    if (i) L.idx = flatKids(chain[i - 1]).filter((k) => k.kind === q.kind && crumbLabel(k) === L.label).findIndex((k) => k.obj === q.obj);
+    return L;
+  });
+  return { levels, pan: s.pan ? { ...s.pan } : null };
+}
+const flatKids = (s) => { try { return children(s, world, renderer).flatMap((k) => (k.group && k.kids ? k.kids() : [k])); } catch { return []; } };
+
+// Find a selection again, as deep as it still exists (a cell not born yet: its parent).
+function resolveSpec(spec, w) {
+  const [top, ...rest] = spec.levels;
+  let s = findTop(top, w);
+  if (!s) return null;
+  for (const L of rest) {
+    const kids = flatKids(s).filter((k) => k.kind === L.kind && crumbLabel(k) === L.label);
+    const k = kids[L.idx] || kids.find((c) => L.id !== undefined && c.obj && c.obj.id === L.id);
+    if (!k) break;
+    s = k;
+  }
+  return s;
+}
+function findTop(L, w) {
+  const cells = w.life.cells;
+  switch (L.kind) {
+    case 'cell': {
+      const c = cells.find((q) => q.id === L.id) || (L.parentId !== undefined && cells.find((q) => q.id === L.parentId));
+      return c ? mkSel('cell', c) : null;
+    }
+    case 'organism': {
+      const ids = new Set(L.members), c = cells.find((q) => ids.has(q.id) && q.orgSize > 1);
+      return c ? organismOf(c, w) : null;
+    }
+    case 'vesicle': { const v = w.soup.vesicles.find((q) => q.id === L.id); return v ? mkSel('vesicle', v) : null; }
+    case 'virus': { const v = w.viruses.list.find((q) => q.id === L.id); if (!v) return null; v.r = v.r || 0.2; return mkSel('virus', v, { world: w }); }
+    case 'polymer': {
+      let p = w.soup.polymers.find((q) => q.id === L.id), home = null;
+      if (!p) for (const v of w.soup.vesicles) { p = v.polys.find((q) => q.id === L.id); if (p) { home = v; break; } }
+      if (!p) return null;
+      p._rad = polymerRadius(p);
+      const s = mkSel('polymer', p);
+      if (home) s.parent = mkSel('vesicle', home);
+      return s;
+    }
+    case 'molecule': {
+      if (L.mid === undefined) return null;
+      const soup = w.soup, i = soup.indexOfMid(L.mid);
+      if (i < 0) return null;
+      const st = { mid: L.mid, x: soup.mx[i], y: soup.my[i], ang: (L.mid * 2.399) % (Math.PI * 2), gone: false };
+      return molecule(soup.mt[i], () => st, () => st.gone, null, { st });
+    }
+  }
+  return null;
+}
 
 function stopSeek() {
   seeking = null;
@@ -141,13 +282,14 @@ function stopSeek() {
 }
 $('btn-seek').onclick = () => {
   if (seeking) { stopSeek(); return; }
+  stopRewind();
   if (story.active) return; // the tour's worlds are replays: jumping ahead would leave the scene
   seeking = { from: world.milestones.length, start: world.t };
   $('btn-seek').classList.add('active');
 };
 $('btn-tour').onclick = () => {
   if (story.active) { story.stop(); return; }
-  stopSeek();
+  stopSeek(); stopRewind();
   story.start(seed);
 };
 $('btn-save').onclick = async () => {
@@ -161,7 +303,7 @@ $('file-load').onchange = async (e) => {
   if (!f) return;
   try {
     const w = await loadFromFile(f);
-    story.stop(); stopSeek();
+    story.stop(); stopSeek(); stopRewind(); rewind.clear();
     world = w;
     seed = w.seed;
     $('seed').value = seed;
@@ -210,6 +352,7 @@ window.addEventListener('keydown', (e) => {
   else if (story.active && e.key === 'ArrowRight') { e.preventDefault(); $('st-fwd').click(); }
   else if (e.key === '+' || e.key === '=') setSpeed(speedIdx + 1);
   else if (e.key === '-') setSpeed(speedIdx - 1);
+  else if (e.key === 'r' || e.key === 'R') $('btn-rew').click();
 });
 
 window.addEventListener('resize', () => renderer.resize());
@@ -453,6 +596,6 @@ ui.onUp = goUp;
 function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT; }
 
 // Console handle for tinkering, e.g. soup.world.life.cells.length
-window.soup = { get world() { return world; }, renderer, ui, opts, story, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
+window.soup = { get world() { return world; }, renderer, ui, opts, story, rewind, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
 
 requestAnimationFrame(loop);

@@ -190,16 +190,24 @@ export class Renderer {
     this.drawWater();
     this.prepFx(world);
     if (opts.showChem) this.drawChemistry(world);
-    // Dividing cells are drawn emerging from the mother's position (a stretching peanut).
-    const moved = [];
-    for (const e of this.fxNow) {
-      if (e.type !== 'divide' || e.mx === undefined) continue;
-      const k = ease(Math.min(1, e.u * 1.6));
-      for (const c of [e.a, e.b]) {
-        if (c.dead) continue;
+    // Dividing cells are drawn emerging from between them (a stretching peanut). The pinch is centred
+    // on where the two daughters are now, not where the mother was: at high speed the 30 ticks of the
+    // animation pass in a frame or two while the cells drift, and pulling them back toward the old
+    // spot flung them around. Daughters already pushed well apart (or dead) skip it, and a cell that
+    // divides again soon only shows its newest division.
+    const moved = [], pinched = new Set();
+    for (let i = this.fxNow.length - 1; i >= 0; i--) {
+      const e = this.fxNow[i];
+      if (e.type !== 'divide' && e.type !== 'vsplit') continue;
+      const a = e.a, b = e.b;
+      e._skip = !a || !b || a.dead || b.dead || pinched.has(a) || pinched.has(b) || Math.hypot(b.x - a.x, b.y - a.y) > (a.r + b.r) * 1.6;
+      if (e._skip || e.type !== 'divide') continue;
+      pinched.add(a); pinched.add(b);
+      const k = ease(Math.min(1, e.u * 1.6)), f = 0.55 + 0.45 * k, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      for (const c of [a, b]) {
         c._dividing = true;
         moved.push([c, c.x, c.y]);
-        c.x = e.mx + (c.x - e.mx) * (0.55 + 0.45 * k); c.y = e.my + (c.y - e.my) * (0.55 + 0.45 * k);
+        c.x = mx + (c.x - mx) * f; c.y = my + (c.y - my) * f;
       }
     }
     this.drawFxUnder();
@@ -513,7 +521,7 @@ export class Renderer {
   drawFxUnder() {
     const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
     for (const e of this.fxNow) {
-      if (e.type !== 'divide' && e.type !== 'vsplit') continue;
+      if ((e.type !== 'divide' && e.type !== 'vsplit') || e._skip) continue;
       const a = e.a, b = e.b;
       if (a.dead || b.dead || !this.inView(a.x, a.y, a.r * 3) || a.r * this.ppu < 2) continue;
       const k = ease(e.u), ra = a.r * 0.92, rb = b.r * 0.92;
