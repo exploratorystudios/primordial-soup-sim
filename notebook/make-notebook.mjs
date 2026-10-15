@@ -75,9 +75,10 @@ CONFIGS = {
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
-FIRST_SEED = 1
+FIRST_SEED = 1001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+                           # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "o2a"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "o2b"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
