@@ -7,19 +7,19 @@
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # Why do some worlds never reach the Great Oxidation? In those, photosynthesis stays near the vents at the
-    # bottom (dim, and vent chemicals soak up the oxygen) and never colonises the bright upper ocean. Nights cut
-    # sunlight to 30% every 4,000 ticks. Do the nights hurt, or is there just not enough light?
-    "baseline":      {},                                       # sun 30%-100%, 4,000-tick days
-    "steady_sun":    {"DAY_SWING": 0},                         # constant 65%: same average, no nights
-    "bright_nights": {"DAY_MEAN": 0.8, "DAY_SWING": 0.2},      # 60%-100%: more light overall
-    "long_days":     {"DAY_LENGTH": 12000},                    # 30%-100% but 12,000-tick days (and nights)
+    # Why do some worlds never reach the Great Oxidation? Oxygen's half-life is ~460 ticks (OXY_DECAY 0.0015),
+    # but a night (sun down to 30%) lasts ~2,000 of the 4,000-tick day: each night wipes out ~95% of the oxygen
+    # made by day, so it rarely accumulates. (With constant daylight, seed 353204 kept its oxygen once it rose.)
+    "baseline":   {},
+    "short_days": {"DAY_LENGTH": 1000},          # nights ~1 oxygen half-life: a dip, not a wipe-out
+    "slow_o2":    {"OXY_DECAY": 0.0005},         # oxygen lasts 3x longer (~1,400-tick half-life)
+    "steady_sun": {"DAY_SWING": 0},              # reference: same total light, no nights
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "sun1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "sun2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 
 
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
