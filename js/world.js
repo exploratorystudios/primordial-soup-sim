@@ -176,7 +176,13 @@ export class World {
     if (this.t % 20 === 0) this.updateCurrents();
     this.stepFields();
     // Once life is established the soup is a slow-changing backdrop: step it every third tick.
-    if (this.life.cells.length < CFG.MAX_ORIGINS_POP * 1.5 || this.t % 3 === 0) this.soup.step();
+    const every = this.life.cells.length < CFG.MAX_ORIGINS_POP * 1.5 ? 1 : 3;
+    if (every === 1 || this.t % 3 === 0) {
+      // (Drawing only: remember when, so its motion can be spread over the ticks until the next step.)
+      if (this.smooth) this.captureSoupPrev();
+      this.soupAt = this.t; this.soupEvery = every; this.soupSmooth = this.smooth;
+      this.soup.step();
+    }
     this.life.step();
     if (this.t % 100 === 0) {
       this.life.census();
@@ -246,26 +252,39 @@ export class World {
   // Remember where things were at the start of the tick, so the renderer can show in-between frames.
   capturePrev() {
     for (const c of this.life.cells) { c.x0 = c.x; c.y0 = c.y; }
+    if (this.viruses) for (const v of this.viruses.list) { v.x0 = v.x; v.y0 = v.y; }
+  }
+
+  // The soup's own previous positions are taken when it steps (free molecules keep theirs in px0/py0).
+  captureSoupPrev() {
     for (const p of this.soup.polymers) { p.x0 = p.x; p.y0 = p.y; p.a0 = p.ang; }
     for (const v of this.soup.vesicles) { v.x0 = v.x; v.y0 = v.y; }
-    if (this.viruses) for (const v of this.viruses.list) { v.x0 = v.x; v.y0 = v.y; }
+  }
+
+  // How far through its latest step to draw the soup. Late in a run it steps only every third tick;
+  // drawing that one step spread over the three ticks keeps it gliding instead of moving in bursts
+  // (it is then drawn up to two ticks behind the simulation).
+  soupAlpha(alpha) {
+    if (!this.soupSmooth || this.soupAt === undefined) return 1;
+    const u = (this.t - 1 + alpha - this.soupAt) / this.soupEvery;
+    return u < 0 ? 0 : u > 1 ? 1 : u;
   }
 
   // Temporarily move everything to its interpolated position (alpha 0 = start of tick, 1 = end).
   // Must be paired with endInterp(); the simulation never sees these positions.
   beginInterp(alpha) {
-    this._interp = this.smooth && alpha < 0.999;
+    const sa = this.smooth ? this.soupAlpha(alpha) : 1;
+    this._interp = this.smooth && (alpha < 0.999 || sa < 0.999);
     if (!this._interp) return;
-    const lerp = (a, b) => a + (b - a) * alpha;
-    const fix = (o) => { if (o.x0 === undefined) return; o._sx = o.x; o._sy = o.y; o.x = lerp(o.x0, o.x); o.y = lerp(o.y0, o.y); };
-    for (const c of this.life.cells) fix(c);
-    for (const p of this.soup.polymers) { fix(p); if (p.a0 !== undefined) { p._sa = p.ang; p.ang = lerp(p.a0, p.ang); } }
-    for (const v of this.soup.vesicles) fix(v);
-    if (this.viruses) for (const v of this.viruses.list) fix(v);
+    const fix = (o, a) => { if (o.x0 === undefined) return; o._sx = o.x; o._sy = o.y; o.x = o.x0 + (o.x - o.x0) * a; o.y = o.y0 + (o.y - o.y0) * a; };
+    for (const c of this.life.cells) fix(c, alpha);
+    if (this.viruses) for (const v of this.viruses.list) fix(v, alpha);
+    for (const p of this.soup.polymers) { fix(p, sa); if (p.a0 !== undefined) { p._sa = p.ang; p.ang = p.a0 + (p.ang - p.a0) * sa; } }
+    for (const v of this.soup.vesicles) fix(v, sa);
     const s = this.soup, n = s.n;
     if (!this._mx || this._mx.length < s.mx.length) { this._mx = new Float32Array(s.mx.length); this._my = new Float32Array(s.mx.length); }
     this._simMx = s.mx; this._simMy = s.my;
-    for (let i = 0; i < n; i++) { this._mx[i] = lerp(s.px0[i], s.mx[i]); this._my[i] = lerp(s.py0[i], s.my[i]); }
+    for (let i = 0; i < n; i++) { this._mx[i] = s.px0[i] + (s.mx[i] - s.px0[i]) * sa; this._my[i] = s.py0[i] + (s.my[i] - s.py0[i]) * sa; }
     s.mx = this._mx; s.my = this._my;
   }
 

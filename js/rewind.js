@@ -64,8 +64,11 @@ export class Rewind {
     const f = this.fine;
     if (!f || t < f.t0 || t > f.t1) this.refine(t);
     const w = load(this.saveAt(t, this.fine.list).s);
-    while (w.t < t) w.step();
-    if (smooth) { w.smooth = true; w.step(); }
+    // Smooth: the last few steps record where things were, including the soup's latest step (it may
+    // step only every third tick).
+    while (w.t < t - 2) w.step();
+    w.smooth = smooth;
+    while (w.t < t + (smooth ? 1 : 0)) w.step();
     return w;
   }
 
