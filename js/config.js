@@ -83,7 +83,11 @@ export const CFG = {
   ARM_COST: 0.015,
   ADH_COST: 0.002,
   ADH_BOOST: 0,
-  COLMAX_INIT: 0.1,        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
+  COLMAX_INIT: 0.1,
+  SHARE_INIT: 0.2,         // founders' energy-sharing gene starts in [0, this)
+  SHIELD: false,           // predators and viruses reach only a colony's exposed cells (inner cells are shielded)
+  SHIELD_BONDS: 3,         // a cell bonded to at least this many neighbours counts as inner
+  COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
   O2_YIELD: 0.1,

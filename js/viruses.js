@@ -71,6 +71,7 @@ export class Viruses {
         for (let q = R.VSTART[k], qe = q + R.VCOUNT[k]; q < qe; q++) {
           const c = L.slotCell[R.VC[q]];
           if (!c || c.dead || c.infected) continue;
+          if (CFG.SHIELD && c.bonds.length >= CFG.SHIELD_BONDS) continue; // inner colony cells are out of reach
           // Binding: the virus's key must fit the cell's receptor shape.
           const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
           const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);

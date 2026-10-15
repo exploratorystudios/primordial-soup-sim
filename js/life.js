@@ -114,6 +114,7 @@ export class Life {
     this.w = world;
     this.cells = [];
     this.newborns = [];
+    this.swim = new Map(); // COLONY_SWIM: each colony's thrust and mass this tick
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
     this.xs = new Float32Array(4096);
@@ -210,7 +211,19 @@ export class Life {
     this.groupByField(V);
     this.runPhase(V, 'share');
     F.chem.set(V.FCHEM); F.organic.set(V.FORG); F.nutrient.set(V.FNUT); F.oxygen.set(V.FOXY);
+    this.swim.clear();
     for (let k = 0; k < n; k++) if (!cells[k].dead) this.live(cells[k]);
+    // Colonies swim as one body: the combined thrust moves every cell alike (more mass, slower).
+    if (this.swim.size) {
+      for (let k = 0; k < n; k++) {
+        const c = cells[k];
+        if (c.dead || c.orgSize <= 1 || c.bonds.length === 0) continue;
+        const a = this.swim.get(c.org);
+        if (!a) continue;
+        const f = 1 / Math.max(1, Math.sqrt(a.m));
+        c.vx += a.x * f; c.vy += a.y * f;
+      }
+    }
     this.interact();
     if (this.w.t % 2 === 0) this.relax();
     this.physics();
@@ -291,12 +304,23 @@ export class Life {
   // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
   steer(c, tm, s) {
     const mot = c.motil * tm[4];
+    // A colony swims as one body (COLONY_SWIM): every cell adds its mass, and its thrust if it swims.
+    const col = CFG.COLONY_SWIM && c.orgSize > 1 && c.bonds.length > 0;
+    let a;
+    if (col) {
+      a = this.swim.get(c.org);
+      if (!a) { a = { x: 0, y: 0, m: 0 }; this.swim.set(c.org, a); }
+      a.m += c.m;
+    }
     if (mot < 0.03) return;
     const V = this.V, f = V.OUTF[s];
     if (f & K.O_SENSED) { c.px = V.PX[s]; c.py = V.PY[s]; c.fx = V.FX[s]; c.fy = V.FY[s]; }
     if (f & K.O_RETHINK) { c.heading = V.HEAD[s] = V.HEADOUT[s]; c.dirX = V.DIRX[s]; c.dirY = V.DIRY[s]; }
-    const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
-    c.vx += c.dirX * th; c.vy += c.dirY * th;
+    if (col) { a.x += c.dirX * mot * CFG.MOT_SPEED; a.y += c.dirY * mot * CFG.MOT_SPEED; }
+    else {
+      const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
+      c.vx += c.dirX * th; c.vy += c.dirY * th;
+    }
     c.energy -= mot * CFG.MOT_COST * c.m;
   }
 
@@ -564,6 +588,7 @@ export class Life {
     if (pa < 0.04) return false;
     // Prey must be engulfable. Being part of a large colony is a defence (cf. Boraas' predation experiments).
     if (this.bodyRadius(a) < this.bodyRadius(b) * 1.2) return false;
+    if (CFG.SHIELD && b.bonds.length >= CFG.SHIELD_BONDS) return false; // inside its colony, out of reach
     if (CFG.KIN_SPARE > 0 && a.species === b.species && a.energy > a.cap * CFG.KIN_SPARE) return false; // spares kin unless starving
     const rng = this.w.rng;
     const def = Math.min(0.95, b.armor * TM[b.type][5] * 0.8);
