@@ -100,7 +100,7 @@ export const CFG = {
   // Viruses infect one domain: bacteriophages can't infect eukaryotes (different surfaces, entry and machinery) and
   // eukaryotic viruses can't infect bacteria. A new virus particle jumps to the other domain with VIRUS_JUMP.
   VIRUS_DOMAIN: true, VIRUS_JUMP: 0.001,
-  PRED_P: 0.4,             // chance a hunt succeeds (was 0.25: predators stayed rare)
+  PRED_P: 0.3,             // chance a hunt succeeds (0.25 kept predators rare; 0.4 ate too many colonies)
   ENDO_P: 0.05,
   // Endosymbiosis by partnership (closer to the leading hypothesis: an archaeal host and an aerobic bacterium
   // living in close contact merge, without the host hunting): chance per contact. 0 = only the predation route.
