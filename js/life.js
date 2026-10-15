@@ -40,6 +40,7 @@ export class Cell {
     this.bonds = [];
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
+    this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
     this.heading = (id * 2.399) % 6.283;
     this.px = 0; this.py = 0; this.fx = 0; this.fy = 0;
@@ -269,6 +270,8 @@ export class Life {
 
     this.steer(c, tm, s);
     c.nut += V.GNUT[s];
+    // Carrying a second body past what oxygen can supply costs extra.
+    if (c.para && CFG.REALISTIC_MULTI && c.orgSize > this.bodyLimit(c)) c.energy -= CFG.PARA_COST * c.m;
 
     if (c.energy <= 0) { this.kill(c, (V.OUTF[s] & K.O_OXDEATH) ? 'oxygen' : 'starved', false); return; }
     if (c.age > c.lifespan || rng.next() < 0.00003) { this.kill(c, 'aged', false); return; }
@@ -473,11 +476,14 @@ export class Life {
     const sp = this.species.get(c.species);
     if (!sp || Gn.distance(g, sp.rep) > CFG.SPECIATE) child.species = this.newSpecies(child, c.species).id;
     // Incomplete separation after division: the seed of multicellularity.
-    if (c.type !== T_GERM && c.orgSize < c.colMax && c.bonds.length < CFG.MAX_BONDS && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh + CFG.ADH_BOOST) {
+    // A colony growing its copy (PARATOMY) keeps every new cell, past its usual size limit.
+    if (c.type !== T_GERM && c.bonds.length < CFG.MAX_BONDS && ((c.para && c.orgSize < c.paraT)
+      || (c.orgSize < c.colMax && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh + CFG.ADH_BOOST))) {
       link(c, child);
       child.org = c.org;
       child.orgSize = ++c.orgSize;
       child.type = c.type;
+      if (c.para) { child.para = true; child.paraT = c.paraT; child.paraStart = c.paraStart; }
     }
     child.sexual = sexual;
     this.newborns.push(child);
@@ -696,7 +702,7 @@ export class Life {
     for (const c of cells) {
       if (c.dead || c._s === stamp) continue;
       c._s = stamp;
-      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
+      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
       q.length = 0; q.push(c);
       let root = c;
       for (let k = 0; k < q.length; k++) {
@@ -705,8 +711,29 @@ export class Life {
         for (const o of x.bonds) if (o._s !== stamp) { o._s = stamp; q.push(o); }
       }
       const comp = q.slice();
-      // Reproduction by fragmentation: a colony that can grow no further splits in two.
-      if (CFG.FRAGMENT && !again && comp.length >= 4 && comp.length >= this.fragLimit(root)) { this.fragment(comp, root); split = true; }
+      let keep = false; // (cells keep their jobs while the colony grows its copy)
+      if (CFG.PARATOMY) {
+        // Paratomy: a colony that can grow no further first doubles, its new cells taking their parent's job,
+        // then splits into two halves with matching make-up.
+        const rep = comp.length >= 4 ? comp.find((x) => x.para) : undefined;
+        if (rep) {
+          if (!again && (comp.length >= rep.paraT || w.t - rep.paraStart > CFG.PARA_TIME)) {
+            for (const x of comp) x.para = false;
+            this.fragment(comp, root, true); split = true;
+          } else {
+            keep = true;
+            for (const x of comp) if (!x.para) { x.para = true; x.paraT = rep.paraT; x.paraStart = rep.paraStart; }
+          }
+        } else if (comp.length < 4) {
+          for (const x of comp) x.para = false;
+        } else if (!again && comp.length >= this.fragLimit(root)) {
+          for (const x of comp) { x.para = true; x.paraT = comp.length * 2; x.paraStart = w.t; }
+          keep = true;
+        }
+      } else if (CFG.FRAGMENT && !again && comp.length >= 4 && comp.length >= this.fragLimit(root)) {
+        // Reproduction by fragmentation: a colony that can grow no further splits in two.
+        this.fragment(comp, root); split = true;
+      }
       root._ds = stamp; root.depth = 0;
       const q2 = [root];
       for (let k = 0; k < q2.length; k++) {
@@ -718,7 +745,7 @@ export class Life {
       for (const x of comp) {
         x.org = root.id;
         x.orgSize = size;
-        const nt = this.differentiate(x, size, w.lightAt(x.x, x.y));
+        const nt = keep ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
         if (nt !== x.type) { x.type = nt; x.sv++; }
         org.types[x.type]++;
         org.x += x.x; org.y += x.y;
@@ -740,20 +767,35 @@ export class Life {
     return CFG.REALISTIC_MULTI ? Math.min(root.colMax, this.bodyLimit(root)) : root.colMax;
   }
 
-  // Split a colony into two connected halves, grown outward from its founder and from the cell farthest from it.
-  fragment(comp, root) {
+  // Split a colony into two connected halves, grown outward from its founder and from a cell far from it (the
+  // farthest, or with balanced = true whichever of the farthest few gives the closest match in size and cell types).
+  fragment(comp, root, balanced = false) {
     const st = ++this.stamp;
     root._ds = st;
     const order = [root];
     for (let k = 0; k < order.length; k++) for (const o of order[k].bonds) if (o._ds !== st) { o._ds = st; order.push(o); }
-    const side = new Map(), qa = [root], qb = [order[order.length - 1]];
-    side.set(qa[0], 0); side.set(qb[0], 1);
-    for (let ia = 0, ib = 0; ia < qa.length || ib < qb.length;) {
-      for (const [qq, s, k] of [[qa, 0, ia], [qb, 1, ib]]) {
-        if (k >= qq.length) continue;
-        for (const o of qq[k].bonds) if (!side.has(o)) { side.set(o, s); qq.push(o); }
+    const halves = (far) => {
+      const side = new Map(), qa = [root], qb = [far];
+      side.set(root, 0); side.set(far, 1);
+      for (let ia = 0, ib = 0; ia < qa.length || ib < qb.length;) {
+        for (const [qq, s, k] of [[qa, 0, ia], [qb, 1, ib]]) {
+          if (k >= qq.length) continue;
+          for (const o of qq[k].bonds) if (!side.has(o)) { side.set(o, s); qq.push(o); }
+        }
+        ia++; ib++;
       }
-      ia++; ib++;
+      return side;
+    };
+    let side = halves(order[order.length - 1]);
+    if (balanced) {
+      let best = Infinity;
+      for (let k = order.length - 1; k >= Math.max(1, order.length - 8); k--) {
+        const sd = halves(order[k]), d = new Array(Gn.NTYPES + 1).fill(0);
+        for (const c of comp) { const v = sd.get(c) ? -1 : 1; d[c.type] += v; d[Gn.NTYPES] += v; }
+        let score = 2 * Math.abs(d[Gn.NTYPES]);
+        for (let t = 0; t < Gn.NTYPES; t++) score += Math.abs(d[t]);
+        if (score < best) { best = score; side = sd; }
+      }
     }
     const cut = [];
     for (const c of comp) for (const o of c.bonds) if (side.get(c) === 0 && side.get(o) === 1) cut.push(c, o);

@@ -89,6 +89,11 @@ export const CFG = {
   SHIELD_BONDS: 3,         // a cell bonded to at least this many neighbours counts as inner
   FRAGMENT: false,         // a colony that reaches its size limit splits into two halves that keep their cells,
                            // bonds and jobs (like snowflake yeast and filamentous cyanobacteria)
+  PARATOMY: false,         // instead of splitting at its size limit, a colony first grows a copy of itself (new cells
+                           // keep their parent's job) to double size, then splits into two matching halves (cf. annelid
+                           // and flatworm paratomy, Volvox daughter colonies). Takes the place of FRAGMENT.
+  PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway
+  PARA_COST: 0.01,         // extra upkeep (x metabolic size) for a doubling colony beyond the oxygen-limited body size
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
