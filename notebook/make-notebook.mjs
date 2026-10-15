@@ -66,22 +66,23 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # All on the current defaults (longer-lived oxygen, Earth-like multicellularity, mitochondrial respiration,
-    # partnership endosymbiosis, PRED_P 0.4). In euk1 eukaryotes arose in half the worlds and mostly survived,
-    # but stayed tiny (4-9 cells) and never made complex organisms; worlds sat at the 4,000-cell cap (~78k
-    # crowding deaths each) and eukaryotes arrived late (~50k of 70k ticks). Run longer, and test:
-    # (Both changes have since become the defaults, so the old values are spelled out.)
-    "neither":   {"EUK_NUT": 1, "MAX_CELLS": 4000},     # the defaults before this run
-    "euk_nut":   {"MAX_CELLS": 4000},                    # eukaryotes need half the nutrient to divide
-    "more_room": {"EUK_NUT": 1},                         # population cap 6,000 instead of 4,000
-    "both":      {},                                     # both (the current defaults)
+    # Double-checking everything changed today, and the new day/night oxygen fix: shorter days (1,000 ticks,
+    # was 4,000) and an atmosphere buffering the surface water (ATM_SIZE 8). Each result records the lowest
+    # and highest ocean oxygen in every 2,000-tick window (trace columns 6-7) and the air's oxygen (column 8).
+    "original":  {"VES_NT_REACH_EARLY": None, "OXY_DECAY": 0.0015, "REALISTIC_MULTI": False, "MITO_AER": 0,
+                  "SYMBIO_P": 0, "PRED_P": 0.25, "MAX_CELLS": 4000, "EUK_NUT": 1,
+                  "DAY_LENGTH": 4000, "ATM_SIZE": 0},     # the simulation as it was this morning
+    "pre_fix":   {"DAY_LENGTH": 4000, "ATM_SIZE": 0},      # today's changes, before the oxygen fix
+    "short_day": {"ATM_SIZE": 0},                          # + 1,000-tick days only
+    "air":       {"DAY_LENGTH": 4000},                     # + atmosphere only
+    "current":   {},                                       # + both: the current defaults
 }
-TICKS = 120_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
-SEEDS_PER_CONFIG = 40     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 2001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+TICKS = 100_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
+SEEDS_PER_CONFIG = 31     # None: chosen from the number of cores (one full wave)
+FIRST_SEED = 3001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "room1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "check1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------

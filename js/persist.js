@@ -29,7 +29,7 @@ export function serialize(w) {
   const F = w.fields, soup = w.soup, L = w.life, n = soup.n;
   return {
     version: VERSION, seed: w.seed, t: w.t, rng: { s: w.rng.s, spare: w.rng._spare },
-    env: { vents: w.vents, lightMul: w.lightMul, ventMul: w.ventMul, timers: w.timers, phase: w.phase, o2: w.o2 },
+    env: { vents: w.vents, lightMul: w.lightMul, ventMul: w.ventMul, timers: w.timers, phase: w.phase, o2: w.o2, atmO2: w.atmO2 },
     fields: { chem: b64(F.chem), organic: b64(F.organic), oxygen: b64(F.oxygen), nutrient: b64(F.nutrient) },
     record: { milestones: w.milestones, logs: w.logs, history: w.history, historyEvery: w.historyEvery },
     soup: {

@@ -44,7 +44,8 @@ if (args.worker !== undefined) {
   };
   const t0 = Date.now();
   let peakCells = 0;
-  const trace = []; // [tick, cells, eukaryotes, predators, photosynthesizers, O2]
+  const trace = []; // [tick, cells, eukaryotes, predators, photosynthesizers, O2, O2 low, O2 high, air O2]
+  let o2lo = Infinity, o2hi = -Infinity;
   const keys = STAGES.map(([k]) => k);
   while (w.t < ticks) {
     w.step();
@@ -52,7 +53,13 @@ if (args.worker !== undefined) {
     if (w.t % 1000 === 0 && keys.every((k) => w.mset.has(k))) break;
     if (w.t % 1000 === 0) peakCells = Math.max(peakCells, w.life.cells.length);
     // A coarse history for diagnosis: population, eukaryotes, predators, photosynthesizers, oxygen.
-    if (w.t % 2000 === 0) { const st = w.life.stats; trace.push([w.t, w.life.cells.length, st.euk, st.pred, st.photosynthesizers, +w.o2.toFixed(3)]); }
+    // Ocean oxygen is re-measured every 100 ticks: keep its lowest and highest in each 2,000-tick window.
+    if (w.t % 100 === 0) { o2lo = Math.min(o2lo, w.o2); o2hi = Math.max(o2hi, w.o2); }
+    if (w.t % 2000 === 0) {
+      const st = w.life.stats;
+      trace.push([w.t, w.life.cells.length, st.euk, st.pred, st.photosynthesizers, +w.o2.toFixed(3), +o2lo.toFixed(3), +o2hi.toFixed(3), +(w.atmO2 || 0).toFixed(3)]);
+      o2lo = Infinity; o2hi = -Infinity;
+    }
     if (w.t % 2000 === 0) process.stderr.write(`PROGRESS ${w.t}\n`);
   }
   const st = w.life.stats;

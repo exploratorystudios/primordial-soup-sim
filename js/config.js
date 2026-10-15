@@ -16,8 +16,12 @@ export const CFG = {
   NUT_DIFF: 0.3, NUT_BURIAL: 0.0004,
   VENT_NUT: 0.1,          // minerals from vents
   WEATHERING: 0.16,         // minerals washed in at the surface (rivers, dust)
+  // Atmosphere: a well-mixed air reservoir swapping oxygen with the surface water, which buffers the ocean
+  // through day and night (most of Earth's free oxygen is in the air). ATM_SIZE is its capacity in rows of
+  // water (0 = no atmosphere); ATM_EXCHANGE the share of the difference swapped per tick at the surface.
+  ATM_SIZE: 8, ATM_EXCHANGE: 0.05, ATM_DECAY: 0.00005,
   O2_REF: 1.5,               // oxygen level considered "fully oxygenated"
-  DAY_LENGTH: 4000,
+  DAY_LENGTH: 1000,        // ticks per day (was 4,000: nights outlasted oxygen, so it crashed every night)
   DAY_MEAN: 0.65, DAY_SWING: 0.35, // sunlight over a day: DAY_MEAN ± DAY_SWING (night 30%, noon 100%)
   LIGHT_DEPTH: 1.6,        // light attenuation with depth
   CURRENT: 0.12,

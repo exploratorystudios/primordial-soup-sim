@@ -58,6 +58,7 @@ export class World {
     this.lightMul = 1;
     this.ventMul = 1;
     this.dayFactor = 1;
+    this.atmO2 = 0; // oxygen in the air (same units as the water's)
     this.timers = { snowball: 0, volcano: 0 };
     this.milestones = [];
     this.mset = new Set();
@@ -150,6 +151,14 @@ export class World {
     // Oxygen is mopped up by reduced chemicals (and, implicitly, dissolved iron): the
     // reason the Great Oxidation Event lagged behind the origin of photosynthesis.
     const chem = F.chem, oxy = F.oxygen;
+    // The air above takes up oxygen from the surface water when it has more, and gives it back when it
+    // has less: a buffer between day and night.
+    if (CFG.ATM_SIZE > 0) {
+      let net = 0;
+      for (let x = 0; x < gw; x++) { const f = CFG.ATM_EXCHANGE * (this.atmO2 - oxy[x]); oxy[x] += f; net += f; }
+      this.atmO2 = (this.atmO2 - net / (gw * CFG.ATM_SIZE)) * (1 - CFG.ATM_DECAY);
+      if (this.atmO2 < 0) this.atmO2 = 0;
+    }
     if (this.t % 2 === 1 && this.mset.has('photo')) {
       const k = 1 - (1 - CFG.OXY_REACT) * (1 - CFG.OXY_REACT); // two ticks' worth
       for (let i = 0; i < F.n; i++) {

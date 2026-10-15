@@ -121,7 +121,7 @@ export class UI {
       ['Virus lineages', world.viruses ? world.viruses.lineages : 0],
       ['Infected cells', st.infected],
       ['Environment'],
-      ['Mean oxygen', world.o2.toFixed(2)],
+      ['Mean oxygen (ocean / air)', `${world.o2.toFixed(2)} / ${(world.atmO2 || 0).toFixed(2)}`],
       ['Births / deaths', `${fmt(L.births)} / ${fmt(Object.values(L.deaths).reduce((a, b) => a + b, 0))}`],
       ['Died: starved / eaten', `${fmt(L.deaths.starved)} / ${fmt(L.deaths.eaten)}`],
       ['Died: O₂ / old age', `${fmt(L.deaths.oxygen)} / ${fmt(L.deaths.aged)}`],

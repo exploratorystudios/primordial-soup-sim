@@ -173,7 +173,16 @@ export class Renderer {
       g.addColorStop(1, '#040a16');
       ctx.fillStyle = g;
       ctx.fillRect(rx0, ry0, rx1 - rx0, ry1 - ry0);
-      const dark = 1 - Math.min(1, world.dayFactor * world.lightMul);
+      // Darkness: the average daylight over the ticks this frame covers, so fast speeds show a steady
+      // average instead of strobing through days and nights.
+      const t1 = this.time, t0 = this._dayT ?? t1 - 1, span = t1 - t0;
+      this._dayT = t1;
+      let day = world.dayFactor;
+      if (span > 1 && span < 1e6) {
+        const k = (2 * Math.PI) / CFG.DAY_LENGTH;
+        day = CFG.DAY_MEAN + (CFG.DAY_SWING * (Math.cos(k * t0) - Math.cos(k * t1))) / (k * span);
+      }
+      const dark = 1 - Math.min(1, day * world.lightMul);
       if (dark > 0) { ctx.fillStyle = `rgba(0,0,8,${dark * 0.55})`; ctx.fillRect(rx0, ry0, rx1 - rx0, ry1 - ry0); }
       if (world.timers.snowball > 0) {
         const iy = Math.min(ry1, sy0 + 14 * ppu);
