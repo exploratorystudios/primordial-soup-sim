@@ -57,7 +57,7 @@ export const CFG = {
   MAX_ORIGINS_POP: 200,    // stop new abiogenesis once life is this abundant
 
   // ---- Life ---------------------------------------------------------------
-  MAX_CELLS: 4000,
+  MAX_CELLS: 6000,         // population cap (was 4,000: worlds sat at it, crowding out slow-growing eukaryotes)
   LIFE_HASH: 24,
   MAX_R: 14,
   CAP_K: 20,
@@ -82,7 +82,7 @@ export const CFG = {
   // Endosymbiosis by partnership (closer to the leading hypothesis: an archaeal host and an aerobic bacterium
   // living in close contact merge, without the host hunting): chance per contact. 0 = only the predation route.
   SYMBIO_P: 0.0005,
-  EUK_NUT: 1,              // nutrient a eukaryote needs to divide, relative to a bacterium of its size
+  EUK_NUT: 0.5,            // nutrient a eukaryote needs to divide, relative to a bacterium of its size
   MITO_AER: 0.9,           // aerobic capacity a eukaryote gets from its mitochondria (0 = only its own gene)
   SYMBIO_O2: 0.05,         // local oxygen (fraction of O2_REF) the partnership needs
   HGT_P: 0.0004,

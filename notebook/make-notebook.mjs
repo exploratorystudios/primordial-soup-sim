@@ -70,10 +70,11 @@ CONFIGS = {
     # partnership endosymbiosis, PRED_P 0.4). In euk1 eukaryotes arose in half the worlds and mostly survived,
     # but stayed tiny (4-9 cells) and never made complex organisms; worlds sat at the 4,000-cell cap (~78k
     # crowding deaths each) and eukaryotes arrived late (~50k of 70k ticks). Run longer, and test:
-    "defaults":  {},
-    "euk_nut":   {"EUK_NUT": 0.5},                       # eukaryotes need half the nutrient to divide
-    "more_room": {"MAX_CELLS": 6000},                    # population cap 6,000 instead of 4,000
-    "both":      {"EUK_NUT": 0.5, "MAX_CELLS": 6000},
+    # (Both changes have since become the defaults, so the old values are spelled out.)
+    "neither":   {"EUK_NUT": 1, "MAX_CELLS": 4000},     # the defaults before this run
+    "euk_nut":   {"MAX_CELLS": 4000},                    # eukaryotes need half the nutrient to divide
+    "more_room": {"EUK_NUT": 1},                         # population cap 6,000 instead of 4,000
+    "both":      {},                                     # both (the current defaults)
 }
 TICKS = 120_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = 40     # None: chosen from the number of cores (one full wave)
