@@ -14,6 +14,9 @@ export const CFG = {
   OXY_DIFF: 0.3, OXY_DECAY: 0.0005, OXY_REACT: 0.01, // (OXY_DECAY was 0.0015: a ~460-tick half-life, too short for oxygen to build up)
   NUT_INIT: 0.3,           // conserved limiting nutrient (think phosphate) per grid cell
   NUT_DIFF: 0.3, NUT_BURIAL: 0.0004,
+  // Oxygenated water rusts dissolved iron into oxides that bind phosphate and carry it to the sea floor: nutrient
+  // is buried up to NUT_RUST times faster where the water is fully oxygenated (1 = no effect).
+  NUT_RUST: 1,
   VENT_NUT: 0.1,          // minerals from vents
   WEATHERING: 0.16,         // minerals washed in at the surface (rivers, dust)
   // Atmosphere: a well-mixed air reservoir swapping oxygen with the surface water, which buffers the ocean

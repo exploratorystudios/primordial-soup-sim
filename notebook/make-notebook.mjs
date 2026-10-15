@@ -66,21 +66,21 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # Tuning food so it, not the 6,000-cell cap, limits mature worlds (the cap's safety valve kills cells at
-    # random: ~324k "crowding" deaths per world in check1). A 40k-tick test (nut1) was too early to see crowding,
-    # which follows the Great Oxidation, but showed deep cuts hurt young worlds (45%) while 75% did not
-    # significantly. So: mild cuts, and one keeping the starting stock full while cutting the ongoing supply.
-    "nut_100":   {},
-    "nut_85":    {"NUT_INIT": 0.255, "VENT_NUT": 0.085, "WEATHERING": 0.136},
-    "nut_75":    {"NUT_INIT": 0.225, "VENT_NUT": 0.075, "WEATHERING": 0.12},
-    "supply_75": {"NUT_INIT": 0.3, "VENT_NUT": 0.075, "WEATHERING": 0.12},          # starting stock 100%, vents and weathering 75%
+    # Oxygenated worlds still fill the 6,000-cell cap even with less nutrient (nut2), so food never limits them and
+    # the cap's safety valve culls cells at random. In oxygenated oceans iron oxides scavenge phosphate and bury it:
+    # NUT_RUST = how many times faster nutrient is buried in fully oxygenated water. Base: nut2's best setting
+    # (starting stock 100%, vents and weathering 75%), which kept every early stage intact.
+    "supply_75": {"VENT_NUT": 0.075, "WEATHERING": 0.12},
+    "rust_x2":   {"VENT_NUT": 0.075, "WEATHERING": 0.12, "NUT_RUST": 2},
+    "rust_x4":   {"VENT_NUT": 0.075, "WEATHERING": 0.12, "NUT_RUST": 4},
+    "rust_x8":   {"VENT_NUT": 0.075, "WEATHERING": 0.12, "NUT_RUST": 8},
 }
 TICKS = 80_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = 28     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 5001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+FIRST_SEED = 6001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "nut2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "rust1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------

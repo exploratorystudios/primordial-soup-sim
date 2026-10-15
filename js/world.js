@@ -175,6 +175,14 @@ export class World {
       F.diffuse(F.organic, CFG.ORG_DIFF * 2, d2(CFG.ORG_DECAY));
       F.diffuse(F.oxygen, Math.min(1, CFG.OXY_DIFF * 2), d2(CFG.OXY_DECAY));
       F.diffuse(F.nutrient, Math.min(1, CFG.NUT_DIFF * 2), d2(CFG.NUT_BURIAL));
+      if (CFG.NUT_RUST > 1) {
+        // Extra burial where there is oxygen: iron oxides scavenge phosphate (two ticks' worth, like the rest).
+        const extra = d2(CFG.NUT_BURIAL) * (CFG.NUT_RUST - 1), nut = F.nutrient, ox = F.oxygen;
+        for (let i = 0; i < F.n; i++) {
+          const f = ox[i] >= CFG.O2_REF ? 1 : ox[i] / CFG.O2_REF;
+          if (f > 0) nut[i] *= 1 - extra * f;
+        }
+      }
     }
   }
 
