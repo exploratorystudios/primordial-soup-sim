@@ -393,7 +393,7 @@ export class Soup {
         for (const p of v.polys) if (p.act > 0) { active++; if (!best || p.act > best.act) best = p; }
         if (best && best.act >= CFG.CELL_ACT && active >= 2) {
           const cell = w.life.spawnFromProtocell(v, best);
-          w.emit('abio', 60, { cell, v, vr: v.r });
+          w.emit('abio', 150, { cell, v, vr: v.r });
           v.dead = true; v.next = cell; v.nextWhy = 'became a living cell!';
           for (const q of v.polys) { q.dead = true; q.next = cell; q.nextWhy = q === best ? 'became the genome of the first cell in its lineage' : 'ended up inside a new living cell'; }
           continue;

@@ -38,6 +38,7 @@ const OVERLAY = {
   nutrient: { rgb: [140, 255, 120], ref: 1.2 },
 };
 const TAU = Math.PI * 2;
+const smooth01 = (a, b, x) => { const t = x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a); return t * t * (3 - 2 * t); };
 const ease = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
 
 // A deterministic "sequence" for drawn DNA so a given cell always shows the same bases.
@@ -210,10 +211,14 @@ export class Renderer {
         c.x = mx + (c.x - mx) * f; c.y = my + (c.y - my) * f;
       }
     }
+    // A cell just born from a protocell fades in under the contracting membrane (drawFx: 'abio').
+    const fading = [];
+    for (const e of this.fxNow) if (e.type === 'abio' && !e.cell.dead) { e.cell._fade = smooth01(0.5, 0.8, e.u); fading.push(e.cell); }
     this.drawFxUnder();
     this.drawLife(world, opts);
     this.drawViruses(world);
     this.drawFx(world);
+    for (const c of fading) c._fade = undefined;
     for (const [c, x, y] of moved) { c.x = x; c.y = y; c._dividing = false; }
 
     if (opts.selection) this.drawSelection(opts.selection);
@@ -493,6 +498,30 @@ export class Renderer {
     p.x = p._rx = ve.x + fx * inner + j.x; p.y = p._ry = ve.y + fy * inner + j.y;
   }
 
+  // Draw something as a whole at partial opacity (its own drawing sets globalAlpha freely), via an
+  // offscreen layer with the same transform.
+  withAlpha(a, fn) {
+    if (a >= 0.999) { fn(); return; }
+    if (a <= 0.001) return;
+    const main = this.ctx, cv = main.canvas;
+    if (!this.layer || this.layer.width !== cv.width || this.layer.height !== cv.height) {
+      this.layer = document.createElement('canvas');
+      this.layer.width = cv.width; this.layer.height = cv.height;
+      this.layerCtx = this.layer.getContext('2d');
+    }
+    const L = this.layerCtx;
+    L.setTransform(1, 0, 0, 1, 0, 0);
+    L.clearRect(0, 0, cv.width, cv.height);
+    L.setTransform(main.getTransform());
+    this.ctx = L;
+    try { fn(); } finally { this.ctx = main; }
+    main.save();
+    main.setTransform(1, 0, 0, 1, 0, 0);
+    main.globalAlpha = a;
+    main.drawImage(this.layer, 0, 0);
+    main.restore();
+  }
+
   // ------------------------------------------------------------- event animations
   // Events from the simulation (world.fx) play out over a few dozen ticks of simulation time, so
   // they are visible at slow speeds and freeze when paused.
@@ -666,23 +695,51 @@ export class Renderer {
           break;
         }
         case 'abio': {
-          // A protocell becomes a living cell: its loose membrane draws in around the new cell, then a
-          // pulse of light as its machinery switches on.
-          const c = e.cell;
+          // A protocell becomes a living cell. Its chemistry switches on (a glow builds, the strand that
+          // becomes the genome lights up), then the protocell contracts around the new cell, using up
+          // its other strands and loose nucleotides; the cell fades in beneath, and a pulse of light
+          // goes out as its machinery starts.
+          const c = e.cell, v = e.v;
           if (c.dead || !this.inView(c.x, c.y, Math.max(c.r * 6, e.vr * 1.5))) break;
-          if (e.vr > c.r) {
-            const shrink = ease(Math.min(1, u * 1.6)), rr = e.vr + (c.r - e.vr) * shrink;
-            ctx.globalAlpha = 0.5 * (1 - shrink) + 0.1;
-            ctx.fillStyle = 'rgba(255,179,240,0.25)';
-            ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, rr, 0, TAU); ctx.fill();
-            ctx.strokeStyle = 'rgba(245,232,180,0.9)'; ctx.lineWidth = Math.max(DIM.bilayer * NM, px);
-            ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, rr, 0, TAU); ctx.stroke();
+          const on = smooth01(0, 0.3, u), shrink = smooth01(0.25, 0.75, u), show = 1 - smooth01(0.68, 0.92, u);
+          const rr = e.vr + (c.r - e.vr) * shrink, X = c.x - cx, Y = c.y - cy;
+          if (show > 0) {
+            const g = ctx.createRadialGradient(X, Y, 0, X, Y, rr);
+            g.addColorStop(0, `rgba(255,229,138,${0.5 * on * show})`);
+            g.addColorStop(1, 'rgba(255,229,138,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(X, Y, rr, 0, TAU); ctx.fill();
+            if (v) {
+              if (!e.genome) e.genome = v.polys.find((p) => p.nextWhy && p.nextWhy.startsWith('became the genome')) || null;
+              const keep = { x: v.x, y: v.y, r: v.r, polys: v.polys, pool: v.pool };
+              v.x = c.x; v.y = c.y; v.r = rr;
+              if (shrink > 0.45 && e.genome) v.polys = [e.genome]; // the rest are taken apart for parts
+              v.pool = keep.pool.map((n) => Math.round(n * (1 - shrink)));
+              this.withAlpha(show, () => this.drawVesicle(v, this.pxnm >= 2.5));
+              const gp = e.genome;
+              if (gp && v.r * this.ppu >= 6 && on > 0) {
+                // The genome strand glows, pulsing, as it starts to be read.
+                const hr = Math.max((gp.seq.length * DIM.ntRise * NM) / 2, 3 * px);
+                ctx.globalAlpha = (0.35 + 0.25 * Math.sin(this.time * 0.35)) * on * show;
+                ctx.strokeStyle = '#ffe58a';
+                ctx.lineWidth = Math.max(0.6 * NM, px * 1.5);
+                ctx.beginPath(); ctx.arc(gp.x - cx, gp.y - cy, hr * 1.15, 0, TAU); ctx.stroke();
+                ctx.globalAlpha = 1;
+              }
+              Object.assign(v, keep);
+            } else if (e.vr > c.r) {
+              ctx.strokeStyle = 'rgba(245,232,180,0.9)'; ctx.lineWidth = Math.max(DIM.bilayer * NM, px);
+              ctx.beginPath(); ctx.arc(X, Y, rr, 0, TAU); ctx.stroke();
+            }
           }
-          ctx.globalAlpha = 1 - u;
-          ctx.strokeStyle = '#ffe58a';
-          ctx.lineWidth = Math.max(c.r * 0.15, px * 2);
-          ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, c.r * (1 + 3 * k), 0, TAU); ctx.stroke();
-          ctx.globalAlpha = 1;
+          if (u > 0.6) {
+            const k2 = (u - 0.6) / 0.4;
+            ctx.globalAlpha = 0.8 * (1 - k2);
+            ctx.strokeStyle = '#ffe58a';
+            ctx.lineWidth = Math.max(c.r * 0.06, px * 1.5);
+            ctx.beginPath(); ctx.arc(X, Y, c.r * (1 + 3 * ease(k2)), 0, TAU); ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
           break;
         }
         case 'spawn': {
@@ -986,11 +1043,12 @@ export class Renderer {
   }
 
   drawLife(world, opts) {
-    const ctx = this.ctx, cells = world.life.cells, ppu = this.ppu, cx = this.cam.x, cy = this.cam.y, px = this.px;
+    const ctx = this.ctx, cells = world.life.cells, ppu = this.ppu;
     let detailed = 0;
     const focus = opts.focusOrg || 0;
     // Flagella first, so they trail behind every cell rather than across neighbours.
     for (const c of cells) {
+      if (c._fade !== undefined && c._fade < 1) continue; // (grow in once the new cell has formed)
       if (c.r * ppu > 2 && this.inView(c.x, c.y, c.r * 6)) {
         ctx.globalAlpha = focus && c.org !== focus ? 0.15 : 1;
         if (c.motil > 0.3) this.drawFlagellum(c, this.time);
@@ -1000,53 +1058,62 @@ export class Renderer {
     ctx.globalAlpha = 1;
     for (const c of cells) {
       if (!this.inView(c.x, c.y, c.r * 6)) continue;
-      const X = c.x - cx, Y = c.y - cy, rp = c.r * ppu;
-      const col = this.cellColor(c, opts.colorMode);
-      const dim = focus && c.org !== focus; // spotlight one organism
-      if (rp < 1.2) {
-        ctx.fillStyle = col;
-        ctx.globalAlpha = dim ? 0.2 : 1;
-        ctx.fillRect(X - px, Y - px, 2 * px, 2 * px);
-        ctx.globalAlpha = 1;
-        continue;
-      }
-      if (dim) {
-        ctx.globalAlpha = 0.16;
-        ctx.fillStyle = col;
-        if (this.bigDisk(X, Y, c.r)) ctx.fill();
-        ctx.globalAlpha = 1;
-        continue;
-      }
-      const fill = 0.35 + 0.65 * Math.max(0.15, Math.min(1, c.energy / c.cap));
-      ctx.globalAlpha = c._dividing ? 0 : rp > 14 ? Math.max(0.85, fill) : fill; // close up, cytoplasm is opaque
+      if (c._fade !== undefined && c._fade < 0.999) { this.withAlpha(c._fade, () => this.drawCell(c, opts, focus, true)); continue; }
+      if (this.drawCell(c, opts, focus, detailed < 120)) detailed++;
+    }
+    this.drawBonds(cells);
+  }
+
+  // One cell; returns whether its interior was drawn in detail.
+  drawCell(c, opts, focus, detail) {
+    const ctx = this.ctx, ppu = this.ppu, cx = this.cam.x, cy = this.cam.y, px = this.px;
+    let detailed = false;
+    const X = c.x - cx, Y = c.y - cy, rp = c.r * ppu;
+    const col = this.cellColor(c, opts.colorMode);
+    const dim = focus && c.org !== focus; // spotlight one organism
+    if (rp < 1.2) {
+      ctx.fillStyle = col;
+      ctx.globalAlpha = dim ? 0.2 : 1;
+      ctx.fillRect(X - px, Y - px, 2 * px, 2 * px);
+      ctx.globalAlpha = 1;
+      return false;
+    }
+    if (dim) {
+      ctx.globalAlpha = 0.16;
       ctx.fillStyle = col;
       if (this.bigDisk(X, Y, c.r)) ctx.fill();
       ctx.globalAlpha = 1;
-      if (rp > 14 && detailed < 120) { detailed++; this.drawCellInterior(c); }
-      else if (c.mito && rp > 3) {
-        ctx.fillStyle = 'rgba(30,20,60,0.75)';
-        ctx.beginPath(); ctx.arc(X, Y, c.r * 0.34, 0, TAU); ctx.fill();
-      }
-      // Cell wall / pellicle (thicker when armored).
-      const armor = c.armor * (c.type === 4 ? 3 : 1);
-      if (armor > 0.15) {
-        const wall = (20 + armor * 80) * NM;
-        if (this.pxnm >= 1.5) this.drawWallMesh(c, wall);
-        else {
-          ctx.strokeStyle = 'rgba(205,165,105,0.85)';
-          ctx.lineWidth = Math.max(wall, px);
-          if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
-        }
-      }
-      if (c._dividing) { /* outline belongs to the shared body while pinching */ }
-      else if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
-      else if (rp > 3 || c.mito) {
-        ctx.strokeStyle = c.mito ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8));
-        if (this.bigRing(X, Y, c.r)) ctx.stroke();
+      return false;
+    }
+    const fill = 0.35 + 0.65 * Math.max(0.15, Math.min(1, c.energy / c.cap));
+    ctx.globalAlpha = c._dividing ? 0 : rp > 14 ? Math.max(0.85, fill) : fill; // close up, cytoplasm is opaque
+    ctx.fillStyle = col;
+    if (this.bigDisk(X, Y, c.r)) ctx.fill();
+    ctx.globalAlpha = 1;
+    if (rp > 14 && detail) { detailed = true; this.drawCellInterior(c); }
+    else if (c.mito && rp > 3) {
+      ctx.fillStyle = 'rgba(30,20,60,0.75)';
+      ctx.beginPath(); ctx.arc(X, Y, c.r * 0.34, 0, TAU); ctx.fill();
+    }
+    // Cell wall / pellicle (thicker when armored).
+    const armor = c.armor * (c.type === 4 ? 3 : 1);
+    if (armor > 0.15) {
+      const wall = (20 + armor * 80) * NM;
+      if (this.pxnm >= 1.5) this.drawWallMesh(c, wall);
+      else {
+        ctx.strokeStyle = 'rgba(205,165,105,0.85)';
+        ctx.lineWidth = Math.max(wall, px);
+        if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
       }
     }
-    this.drawBonds(cells);
+    if (c._dividing) { /* outline belongs to the shared body while pinching */ }
+    else if (DIM.bilayer * this.pxnm >= 1.5) this.drawBilayer(c.x, c.y, c.r, 'rgba(240,235,215,0.95)', 'rgba(230,210,160,0.45)', true, c);
+    else if (rp > 3 || c.mito) {
+      ctx.strokeStyle = c.mito ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8));
+      if (this.bigRing(X, Y, c.r)) ctx.stroke();
+    }
+    return detailed;
   }
 
   drawFlagellum(c, t) {
