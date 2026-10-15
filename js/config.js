@@ -44,7 +44,9 @@ export const CFG = {
   VES_NUCLEATE: 8,
   VES_SPLIT: 34,
   VES_POOL: 60,
-  VES_NT_REACH: 1.5,        // how far beyond its membrane a protocell draws in nucleotides
+  VES_NT_REACH: 1.5,        // how far beyond its membrane a protocell draws in nucleotides (once life is abundant)
+  VES_NT_REACH_EARLY: 1.5,  // ...before life: fades toward VES_NT_REACH as cells multiply (same value = no fade)
+  VES_NT_FADE: 50,          // living cells at which the early extra reach has halved
   VES_MAX_POLY: 14,
   VES_LIPID_LOSS: 0.012,
   VES_BURST: 0.00025,

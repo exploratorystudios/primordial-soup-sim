@@ -324,6 +324,8 @@ export class Soup {
     for (let i = 0; i < np; i++) { this.pxs[i] = P[i].x; this.pys[i] = P[i].y; }
     this.polyHash.build(np, this.pxs, this.pys);
     const mx = this.mx, my = this.my, mt = this.mt, md = this.mdead;
+    // Nucleotide reach: generous in the lifeless early ocean, fading back as living cells multiply.
+    const reach = CFG.VES_NT_REACH + (CFG.VES_NT_REACH_EARLY - CFG.VES_NT_REACH) / (1 + w.life.cells.length / CFG.VES_NT_FADE);
     const out = [];
     for (const v of this.vesicles) {
       if (v.dead) continue;
@@ -338,7 +340,7 @@ export class Soup {
 
       // Absorb lipids (grow) and nucleotides (fatty-acid membranes are permeable to them).
       // Fatty-acid membranes are leaky: nucleotides diffusing nearby are drawn in, lipids only on contact.
-      const rr = v.r + 1.5, rr2 = rr * rr, rn = v.r + CFG.VES_NT_REACH, rn2 = rn * rn;
+      const rr = v.r + 1.5, rr2 = rr * rr, rn = v.r + reach, rn2 = rn * rn;
       let poolTotal = v.pool[0] + v.pool[1] + v.pool[2] + v.pool[3];
       this.hash.query(v.x, v.y, Math.max(rr, rn), (j) => {
         if (md[j]) return;

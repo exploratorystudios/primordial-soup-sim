@@ -2,7 +2,9 @@
 // compares how often each evolutionary stage emerges. The headless simulation is embedded, so the
 // notebook needs nothing else (only Node, which it downloads if the image lacks it).
 //
-//   node notebook/make-notebook.mjs          -> notebook/primordial-soup-ab.ipynb
+//   node notebook/make-notebook.mjs            -> notebook/primordial-soup-ab.ipynb (+ .py script)
+//   node notebook/make-notebook.mjs --compact  -> same, with the embedded code gzipped into short lines
+//                                                 (for notebook editors that choke on big cells)
 //
 // Rebuild after changing the simulation, so the notebook runs the current code.
 import fs from 'node:fs';
@@ -25,12 +27,14 @@ while (queue.length) {
   for (const m of src.matchAll(/(?:import|from)\s*\(?['"](\.\/[^'"]+)['"]/g)) queue.push(path.posix.join(path.posix.dirname(f), m[1]));
 }
 files.add('check-evolution.mjs');
-// Packed as gzipped JSON in base64, wrapped into short lines: browser notebook editors (Modal, Colab, ...)
-// can fail to show a notebook with one huge cell or very long lines.
+// Embedded either as each file's source in base64 (default), or gzipped and wrapped into short lines
+// (--compact), for browser notebook editors that fail to show a notebook with one huge cell.
+const compact = process.argv.includes('--compact');
 const sources = {};
 for (const f of [...files].sort()) sources[f] = fs.readFileSync(path.join(root, f), 'utf8');
 sources['package.json'] = JSON.stringify({ type: 'module' });
 const packed = zlib.gzipSync(JSON.stringify(sources), { level: 9 }).toString('base64').match(/.{1,100}/g).join('\n');
+const blobs = Object.fromEntries(Object.entries(sources).map(([f, t]) => [f, Buffer.from(t).toString('base64')]));
 
 let commit = 'unknown';
 try { commit = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch { /* not a repo */ }
@@ -66,12 +70,15 @@ CONFIGS = {
     # Protocells draw in nucleotides from ~2 µm around them (2x the copying inside), and need 3 completed
     # self-copies (not 1) before becoming a cell, which keeps independent origins of life as rare as now.
     "pool_balanced": {"VES_NT_REACH": 4, "CELL_COPIES": 3},
+    # The same early boost, fading as life spreads (halved at 50 living cells, ~1% left at 4,000), so the
+    # established biosphere sees today's chemistry. Delete a line to compare fewer settings.
+    "pool_gradient": {"VES_NT_REACH_EARLY": 4, "VES_NT_FADE": 50, "CELL_COPIES": 3},
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "pool1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "pool2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
@@ -160,7 +167,7 @@ if major < 18:
 print("Node", ver, "at", NODE)
 assert major >= 18, "Node.js 18+ is needed (allow internet access so it can be downloaded, or install it)"
 `),
-  code(`
+  code(compact ? `
 # ---- The simulation (embedded: its ${files.size} source files, gzipped) ------------------------------------
 import gzip
 PACKED = """
@@ -171,7 +178,15 @@ for rel, text in json.loads(gzip.decompress(base64.b64decode("".join(PACKED.spli
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w") as f:
         f.write(text)
-# Smoke test: a short world must reach the first living cell.
+` : `
+# ---- The simulation (embedded: its ${files.size} source files, base64) ------------------------------------
+FILES = ${JSON.stringify(blobs, null, 1)}
+for rel, b64 in FILES.items():
+    p = os.path.join(SIM, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(base64.b64decode(b64))
+` + `# Smoke test: a short world must reach the first living cell.
 r = subprocess.run([NODE, "check-evolution.mjs", "--worker", "1", "--seed", "1", "--ticks", "2500"],
                    cwd=SIM, capture_output=True, text=True, timeout=600)
 print(r.stdout.strip()[:300] or r.stderr[-2000:])
