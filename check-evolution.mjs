@@ -44,7 +44,8 @@ if (args.worker !== undefined) {
   };
   const t0 = Date.now();
   let peakCells = 0;
-  const trace = []; // [tick, cells, eukaryotes, predators, photosynthesizers, O2, O2 low, O2 high, air O2]
+  const trace = []; // [tick, cells, eukaryotes, predators, photosynthesizers, O2, O2 low, O2 high, air O2,
+  //                  eukaryotic organisms, largest, most specialised cell types, with germline, eukaryote adhesion]
   let o2lo = Infinity, o2hi = -Infinity;
   const keys = STAGES.map(([k]) => k);
   while (w.t < ticks) {
@@ -56,8 +57,21 @@ if (args.worker !== undefined) {
     // Ocean oxygen is re-measured every 100 ticks: keep its lowest and highest in each 2,000-tick window.
     if (w.t % 100 === 0) { o2lo = Math.min(o2lo, w.o2); o2hi = Math.max(o2hi, w.o2); }
     if (w.t % 2000 === 0) {
-      const st = w.life.stats;
-      trace.push([w.t, w.life.cells.length, st.euk, st.pred, st.photosynthesizers, +w.o2.toFixed(3), +o2lo.toFixed(3), +o2hi.toFixed(3), +(w.atmO2 || 0).toFixed(3)]);
+      const st = w.life.stats, L = w.life;
+      // Eukaryotic organisms: how many colonies, the biggest, its most specialised cell types, any germline;
+      // and how sticky eukaryotic cells are (adhesion: the chance daughters stay attached).
+      let eOrgs = 0, eBig = 0, eTypes = 0, eGerm = 0, adh = 0, nE = 0;
+      for (const o of L.organisms) {
+        const sp = L.species.get(o.species);
+        if (!sp || !sp.euk || o.size < 2) continue;
+        eOrgs++; if (o.size > eBig) eBig = o.size;
+        let k = 0; for (let t = 1; t < 6; t++) if (o.types[t] > 0) k++;
+        if (k > eTypes) eTypes = k;
+        if (o.types[5] > 0) eGerm++;
+      }
+      for (const c of L.cells) if (c.mito) { adh += c.adh; nE++; }
+      trace.push([w.t, L.cells.length, st.euk, st.pred, st.photosynthesizers, +w.o2.toFixed(3), +o2lo.toFixed(3), +o2hi.toFixed(3), +(w.atmO2 || 0).toFixed(3),
+        eOrgs, eBig, eTypes, eGerm, nE ? +(adh / nE).toFixed(3) : null]);
       o2lo = Infinity; o2hi = -Infinity;
     }
     if (w.t % 2000 === 0) process.stderr.write(`PROGRESS ${w.t}\n`);
