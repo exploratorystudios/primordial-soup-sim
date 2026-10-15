@@ -66,23 +66,20 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # Double-checking everything changed today, and the new day/night oxygen fix: shorter days (1,000 ticks,
-    # was 4,000) and an atmosphere buffering the surface water (ATM_SIZE 8). Each result records the lowest
-    # and highest ocean oxygen in every 2,000-tick window (trace columns 6-7) and the air's oxygen (column 8).
-    "original":  {"VES_NT_REACH_EARLY": None, "OXY_DECAY": 0.0015, "REALISTIC_MULTI": False, "MITO_AER": 0,
-                  "SYMBIO_P": 0, "PRED_P": 0.25, "MAX_CELLS": 4000, "EUK_NUT": 1,
-                  "DAY_LENGTH": 4000, "ATM_SIZE": 0},     # the simulation as it was this morning
-    "pre_fix":   {"DAY_LENGTH": 4000, "ATM_SIZE": 0},      # today's changes, before the oxygen fix
-    "short_day": {"ATM_SIZE": 0},                          # + 1,000-tick days only
-    "air":       {"DAY_LENGTH": 4000},                     # + atmosphere only
-    "current":   {},                                       # + both: the current defaults
+    # Quick test (40k ticks): worlds sit at the 6,000-cell cap, where a safety valve kills random cells (~324k
+    # "crowding" deaths per world in check1), picking apart slow-growing eukaryotes and would-be organisms. Less
+    # nutrient should let food, not the cap, set the population. All three nutrient sources scaled together.
+    "nut_100": {},
+    "nut_75":  {"NUT_INIT": 0.225, "VENT_NUT": 0.075, "WEATHERING": 0.12},
+    "nut_60":  {"NUT_INIT": 0.18, "VENT_NUT": 0.06, "WEATHERING": 0.096},
+    "nut_45":  {"NUT_INIT": 0.135, "VENT_NUT": 0.045, "WEATHERING": 0.072},
 }
-TICKS = 100_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
-SEEDS_PER_CONFIG = 31     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 3001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+TICKS = 40_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
+SEEDS_PER_CONFIG = 28     # None: chosen from the number of cores (one full wave)
+FIRST_SEED = 4001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "check1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "nut1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
