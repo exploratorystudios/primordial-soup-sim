@@ -40,7 +40,7 @@ export class Cell {
     this.bonds = [];
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
-    this.gf = 1; // TRADEOFF: a colony generalist's strength at its jobs
+    this.gf = 1; // TRADEOFF / SPEC_BONUS: this colony cell's strength at its jobs
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
     this.heading = (id * 2.399) % 6.283;
@@ -599,7 +599,7 @@ export class Life {
     if (CFG.SHIELD && b.bonds.length >= CFG.SHIELD_BONDS) return false; // inside its colony, out of reach
     if (CFG.KIN_SPARE > 0 && a.species === b.species && a.energy > a.cap * CFG.KIN_SPARE) return false; // spares kin unless starving
     const rng = this.w.rng;
-    const def = Math.min(0.95, b.armor * TM[b.type][5] * 0.8);
+    const def = Math.min(0.95, b.armor * TM[b.type][5] * (b.type === T_GENERIC ? 1 : b.gf) * 0.8);
     if (rng.next() > pa * (1 - def) * CFG.PRED_P) return false;
     const F = this.w.fields;
     const o2f = Math.min(1, F.get(F.oxygen, a.x, a.y) / CFG.O2_REF);
@@ -748,8 +748,10 @@ export class Life {
         x.orgSize = size;
         const nt = keep ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
         if (nt !== x.type) { x.type = nt; x.sv++; }
-        // Doing every job at once costs a colony's generalists more the bigger it is (TRADEOFF).
-        const gf = CFG.TRADEOFF > 0 && x.type === T_GENERIC ? Math.max(0.2, 1 - CFG.TRADEOFF * Math.min(1, (size - 1) / 15)) : 1;
+        // Doing every job at once costs a colony's generalists more the bigger it is (TRADEOFF), and its
+        // specialists get better at their one job (SPEC_BONUS).
+        const sz = Math.min(1, (size - 1) / 15);
+        const gf = x.type === T_GENERIC ? (CFG.TRADEOFF > 0 ? Math.max(0.2, 1 - CFG.TRADEOFF * sz) : 1) : 1 + CFG.SPEC_BONUS * sz;
         if (gf !== x.gf) { x.gf = gf; x.sv++; }
         org.types[x.type]++;
         org.x += x.x; org.y += x.y;
