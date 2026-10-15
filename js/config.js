@@ -82,6 +82,7 @@ export const CFG = {
   AER_COST: 0.006,
   ARM_COST: 0.015,
   ADH_COST: 0.002,
+  ADH_BOOST: 0,            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
   O2_YIELD: 0.1,

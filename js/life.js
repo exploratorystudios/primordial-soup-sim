@@ -448,7 +448,7 @@ export class Life {
     const sp = this.species.get(c.species);
     if (!sp || Gn.distance(g, sp.rep) > CFG.SPECIATE) child.species = this.newSpecies(child, c.species).id;
     // Incomplete separation after division: the seed of multicellularity.
-    if (c.type !== T_GERM && c.orgSize < c.colMax && c.bonds.length < CFG.MAX_BONDS && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh) {
+    if (c.type !== T_GERM && c.orgSize < c.colMax && c.bonds.length < CFG.MAX_BONDS && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh + CFG.ADH_BOOST) {
       link(c, child);
       child.org = c.org;
       child.orgSize = ++c.orgSize;
