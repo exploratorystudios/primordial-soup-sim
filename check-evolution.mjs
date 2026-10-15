@@ -30,8 +30,18 @@ if (args.worker !== undefined) {
   const { World } = await import('./js/world.js');
   const { CFG } = await import('./js/config.js');
   if (args.cfg) Object.assign(CFG, JSON.parse(args.cfg));
+  const Gn = await import('./js/genome.js');
   const w = new World(+args.seed);
   const ticks = +args.ticks;
+  // Watch (without changing anything) the first cells to come alive: their genomes are built from
+  // the founding replicator's sequence, so early chemistry shapes every lineage after it.
+  const founders = [];
+  const spawnFrom = w.life.spawnFromProtocell.bind(w.life);
+  w.life.spawnFromProtocell = (v, poly) => {
+    const c = spawnFrom(v, poly);
+    if (founders.length < 10) founders.push({ t: w.t, len: poly.seq.length, act: +poly.act.toFixed(3), g: Array.from(c.g.slice(0, Gn.DIFF), (x) => +x.toFixed(4)) });
+    return c;
+  };
   const t0 = Date.now();
   let peakCells = 0;
   const keys = STAGES.map(([k]) => k);
@@ -45,7 +55,8 @@ if (args.worker !== undefined) {
   const st = w.life.stats;
   const ms = Object.fromEntries(w.milestones.map((m) => [m.key, m.t]));
   console.log(JSON.stringify({
-    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000,
+    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000, ticks: w.t, origins: w.life.origins, founders,
+    geneNames: args.genes ? Gn.GENE_NAMES.slice(0, Gn.DIFF) : undefined,
     final: { cells: w.life.cells.length, peakCells, species: st.speciesAlive, euk: st.euk, multi: st.multicellular, largest: st.largest, viruses: w.viruses ? w.viruses.list.length : 0, o2: +w.o2.toFixed(2), era: w.era().name },
   }));
   process.exit(0);

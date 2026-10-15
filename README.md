@@ -21,6 +21,8 @@ Check that every stage of evolution still emerges (and how often), across many w
 npm run check -- --seeds 1-8 --ticks 70000          # table of when each milestone happened, per seed
 node check-evolution.mjs --seeds 1-20 --md tape.md  # also write a markdown report
 node check-replay.mjs 1                            # save/restore replays exactly (the tour's rewind relies on it)
+
+**Comparing settings at scale (Kaggle).** `node kaggle/make-notebook.mjs` writes `kaggle/primordial-soup-ab.ipynb`, a self-contained notebook (the headless simulation is embedded) that replays many seeds under each setting in `CONFIGS`, using every core it finds, and reports how often and when each stage emerged per setting (Fisher's exact and Mann-Whitney tests, Holm-corrected), a chart with 95% intervals, and how the first cells' genomes and the number of independent origins differ. Results are saved per world, so a stopped session resumes. Rebuild the notebook after changing the simulation.
 ```
 
 Headless (no browser), useful for tuning:

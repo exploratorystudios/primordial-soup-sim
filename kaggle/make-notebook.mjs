@@ -1,0 +1,284 @@
+// Build a self-contained Kaggle notebook that replays many worlds under two (or more) settings and
+// compares how often each evolutionary stage emerges. The headless simulation is embedded, so the
+// notebook needs nothing else (only Node, which it downloads if the image lacks it).
+//
+//   node kaggle/make-notebook.mjs            -> kaggle/primordial-soup-ab.ipynb
+//
+// Rebuild after changing the simulation, so the notebook runs the current code.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const out = path.join(root, 'kaggle', 'primordial-soup-ab.ipynb');
+
+// The simulation's own files: everything world.js pulls in, plus the runner.
+const files = new Set();
+const queue = ['js/world.js'];
+while (queue.length) {
+  const f = queue.pop();
+  if (files.has(f)) continue;
+  files.add(f);
+  const src = fs.readFileSync(path.join(root, f), 'utf8');
+  for (const m of src.matchAll(/(?:import|from)\s*\(?['"](\.\/[^'"]+)['"]/g)) queue.push(path.posix.join(path.posix.dirname(f), m[1]));
+}
+files.add('check-evolution.mjs');
+const blobs = {};
+for (const f of [...files].sort()) blobs[f] = fs.readFileSync(path.join(root, f)).toString('base64');
+blobs['package.json'] = Buffer.from(JSON.stringify({ type: 'module' })).toString('base64');
+
+let commit = 'unknown';
+try { commit = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch { /* not a repo */ }
+const dirty = (() => { try { return execSync('git status --porcelain', { cwd: root }).toString().trim() ? ' (with uncommitted changes)' : ''; } catch { return ''; } })();
+
+const md = (s) => ({ cell_type: 'markdown', metadata: {}, source: lines(s) });
+const code = (s) => ({ cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: lines(s) });
+function lines(s) { const a = s.replace(/^\n/, '').split('\n'); return a.map((l, i) => (i < a.length - 1 ? l + '\n' : l)); }
+
+const cells = [
+  md(`
+# Primordial Soup: replaying the tape of life, at scale
+
+Runs the evolution simulation headless for many seeds under each setting below, then compares how often each
+stage emerges (replicators → cells → proteins → DNA → photosynthesis → Great Oxidation → eukaryotes → sex →
+multicellular → complex organisms), when it happens, and what the first cells' genomes looked like.
+
+Simulation code: commit \`${commit}\`${dirty}, built ${new Date().toISOString().slice(0, 10)}.
+
+**Before running:** if the image has no Node.js 18+, the setup cell downloads it, which needs *Internet* switched on
+in the notebook settings. Results are saved after every run (\`results.jsonl\`), so if the session stops, run all
+cells again and it carries on where it left off. Change \`RUN_TAG\` to start a fresh experiment.
+`),
+  code(`
+# ---- Experiment settings -------------------------------------------------------------------------
+# Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
+CONFIGS = {
+    "baseline":    {},
+    "wide_uptake": {"VES_NT_REACH": 6},   # protocells draw in nucleotides from ~3 µm around them
+}
+TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
+SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
+FIRST_SEED = 1
+WORKERS = None            # None: as many as the cores and memory allow
+RUN_TAG = "ab1"           # results go to results-<RUN_TAG>.jsonl
+`),
+  code(`
+# ---- Environment: cores, memory, Node.js ---------------------------------------------------------
+import os, sys, json, shutil, subprocess, platform, tarfile, urllib.request, base64, time
+
+WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.getcwd()
+SIM = os.path.join(WORK, "primordial-soup")
+cores = os.cpu_count() or 1
+def avail_gb():
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1e6
+    except OSError:
+        pass
+    return 8.0
+mem = avail_gb()
+GB_PER_WORLD = 0.6        # a late-game world with ~4,000 cells peaks around this
+if WORKERS is None:
+    WORKERS = max(1, min(cores, int(mem / GB_PER_WORLD)))
+if SEEDS_PER_CONFIG is None:
+    SEEDS_PER_CONFIG = max(16, WORKERS // len(CONFIGS))
+print(f"{cores} cores, {mem:.0f} GB free -> {WORKERS} worlds at a time; "
+      f"{SEEDS_PER_CONFIG} seeds x {len(CONFIGS)} settings = {SEEDS_PER_CONFIG * len(CONFIGS)} worlds")
+
+def node_version(exe):
+    try:
+        v = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+        return int(v.lstrip("v").split(".")[0]), v
+    except Exception:
+        return 0, None
+
+NODE = shutil.which("node")
+major, ver = node_version(NODE) if NODE else (0, None)
+if major < 18:
+    arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine(), "x64")
+    name = f"node-v20.18.0-linux-{arch}"
+    dest = os.path.join(WORK, name)
+    if not os.path.isdir(dest):
+        url = f"https://nodejs.org/dist/v20.18.0/{name}.tar.xz"
+        print("Downloading", url)
+        tar = os.path.join(WORK, name + ".tar.xz")
+        urllib.request.urlretrieve(url, tar)
+        with tarfile.open(tar) as t:
+            t.extractall(WORK)
+        os.remove(tar)
+    NODE = os.path.join(dest, "bin", "node")
+    major, ver = node_version(NODE)
+print("Node", ver, "at", NODE)
+assert major >= 18, "Node.js 18+ is needed (switch Internet on so it can be downloaded)"
+`),
+  code(`
+# ---- The simulation (embedded) --------------------------------------------------------------------
+FILES = ${JSON.stringify(blobs, null, 1)}
+for rel, b64 in FILES.items():
+    p = os.path.join(SIM, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(base64.b64decode(b64))
+# Smoke test: a short world must reach the first living cell.
+r = subprocess.run([NODE, "check-evolution.mjs", "--worker", "1", "--seed", "1", "--ticks", "2500"],
+                   cwd=SIM, capture_output=True, text=True, timeout=600)
+print(r.stdout.strip()[:300] or r.stderr[-2000:])
+`),
+  code(`
+# ---- Run (resumable) ------------------------------------------------------------------------------
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+RESULTS = os.path.join(WORK, f"results-{RUN_TAG}.jsonl")
+done = set()
+if os.path.exists(RESULTS):
+    for line in open(RESULTS):
+        try:
+            r = json.loads(line)
+            if not r.get("error"):
+                done.add((r["config"], r["seed"]))
+        except json.JSONDecodeError:
+            pass
+seeds = range(FIRST_SEED, FIRST_SEED + SEEDS_PER_CONFIG)
+# Interleave the settings, so a run that stops early still has a fair comparison.
+tasks = [(name, s) for s in seeds for name in CONFIGS if (name, s) not in done]
+print(f"{len(done)} worlds already done, {len(tasks)} to go")
+
+def run(task):
+    name, seed = task
+    cmd = [NODE, "check-evolution.mjs", "--worker", "1", "--seed", str(seed), "--ticks", str(TICKS),
+           "--cfg", json.dumps(CONFIGS[name]), "--genes", "1"]
+    p = subprocess.run(cmd, cwd=SIM, capture_output=True, text=True)
+    try:
+        r = json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        r = {"seed": seed, "error": (p.stderr or "no output")[-1500:]}
+    r["config"] = name
+    return r
+
+t0 = time.time()
+n = len(tasks)
+with ThreadPoolExecutor(WORKERS) as ex, open(RESULTS, "a") as out:
+    futs = [ex.submit(run, t) for t in tasks]
+    for k, f in enumerate(as_completed(futs), 1):
+        r = f.result()
+        out.write(json.dumps(r) + "\\n"); out.flush()
+        if r.get("error"):
+            print("FAILED", r["config"], r["seed"], r["error"][-300:])
+        if k == n or k % max(1, n // 40) == 0:
+            el = time.time() - t0
+            print(f"{k}/{n} worlds, {el/60:.1f} min elapsed, ~{el / k * (n - k) / 60:.0f} min left (rough)")
+print("Done:", RESULTS)
+`),
+  code(`
+# ---- Analysis -------------------------------------------------------------------------------------
+import pandas as pd, numpy as np
+from scipy.stats import fisher_exact, mannwhitneyu
+def show(df):
+    try:
+        display(df)
+    except NameError:
+        print(df.to_string())
+
+STAGES = [("replicator", "Replicator"), ("protocell", "Protocell"), ("cell", "Living cell"),
+          ("translation", "Proteins / genetic code"), ("dna", "DNA genome"), ("photo", "Photosynthesis"),
+          ("virus", "Viruses"), ("goe", "Great Oxidation"), ("eukaryote", "Eukaryote"),
+          ("sex", "Sexual reproduction"), ("multicellular", "Multicellular"), ("complex", "Complex organism")]
+runs = [json.loads(l) for l in open(RESULTS)]
+runs = [r for r in runs if not r.get("error") and r["config"] in CONFIGS]
+names = list(CONFIGS)
+base = names[0]
+by = {c: [r for r in runs if r["config"] == c] for c in names}
+print({c: len(v) for c, v in by.items()}, "worlds per setting")
+
+def wilson(k, n, z=1.96):
+    if n == 0: return (np.nan, np.nan)
+    p = k / n; d = 1 + z*z/n; c = (p + z*z/(2*n)) / d; h = z * np.sqrt(p*(1-p)/n + z*z/(4*n*n)) / d
+    return (c - h, c + h)
+
+def holm(ps):
+    order = np.argsort(ps); adj = np.empty(len(ps)); m = len(ps); run = 0
+    for i, j in enumerate(order):
+        run = max(run, min(1, (m - i) * ps[j])); adj[j] = run
+    return adj
+
+rows = []
+for key, label in STAGES:
+    row = {"stage": label}
+    for c in names:
+        t = [r["ms"][key] for r in by[c] if key in r["ms"]]
+        n = len(by[c]); k = len(t); lo, hi = wilson(k, n)
+        row[f"{c} %"] = round(100 * k / n, 1) if n else np.nan
+        row[f"{c} 95% CI"] = f"{100*lo:.0f}-{100*hi:.0f}"
+        row[f"{c} median tick"] = int(np.median(t)) if t else None
+    for c in names[1:]:
+        kb = sum(key in r["ms"] for r in by[base]); nb = len(by[base])
+        kc = sum(key in r["ms"] for r in by[c]); nc = len(by[c])
+        row[f"p rate ({c})"] = fisher_exact([[kc, nc - kc], [kb, nb - kb]])[1] if nb and nc else np.nan
+        tb = [r["ms"][key] for r in by[base] if key in r["ms"]]; tc = [r["ms"][key] for r in by[c] if key in r["ms"]]
+        row[f"p timing ({c})"] = mannwhitneyu(tc, tb).pvalue if len(tb) > 2 and len(tc) > 2 else np.nan
+    rows.append(row)
+table = pd.DataFrame(rows)
+for c in names[1:]:
+    ps = table[f"p rate ({c})"].fillna(1).values
+    table[f"p rate ({c}) Holm"] = holm(ps)
+pd.set_option("display.width", 250)
+show(table)
+print("p rate: Fisher's exact test on how often the stage happened vs the baseline; p timing: Mann-Whitney U on "
+      "when it happened (among worlds that reached it); Holm: corrected for testing 12 stages at once.")
+`),
+  code(`
+# ---- Chart: share of worlds reaching each stage, with 95% intervals -----------------------------
+import matplotlib.pyplot as plt
+x = np.arange(len(STAGES)); w = 0.8 / len(names)
+fig, ax = plt.subplots(figsize=(13, 4.5))
+for i, c in enumerate(names):
+    n = len(by[c]); ks = [sum(k in r["ms"] for r in by[c]) for k, _ in STAGES]
+    p = np.array(ks) / max(1, n); ci = np.array([wilson(k, n) for k in ks])
+    ax.bar(x + i*w - 0.4 + w/2, 100*p, w, yerr=[np.clip(100*(p - ci[:,0]), 0, None), np.clip(100*(ci[:,1] - p), 0, None)], capsize=3, label=f"{c} (n={n})")
+ax.set_xticks(x); ax.set_xticklabels([l for _, l in STAGES], rotation=35, ha="right")
+ax.set_ylabel("% of worlds"); ax.set_ylim(0, 105); ax.legend(); ax.set_title(f"Stages reached within {TICKS:,} ticks")
+plt.tight_layout(); plt.show()
+`),
+  code(`
+# ---- Founders: did the first cells start out different? -------------------------------------------
+# A first cell's genome is built from its protocell's best replicator, so a change to early chemistry can
+# change every lineage's starting traits. Compare the average founder genome per world.
+genes = next((r["geneNames"] for r in runs if r.get("geneNames")), None)
+def founder_means(c):
+    out = []
+    for r in by[c]:
+        fs = r.get("founders") or []
+        if fs: out.append(np.mean([f["g"] for f in fs], axis=0))
+    return np.array(out)
+fb = founder_means(base)
+for c in names[1:]:
+    fc = founder_means(c)
+    if len(fb) < 3 or len(fc) < 3:
+        print("Not enough founders yet"); continue
+    res = []
+    for j, g in enumerate(genes):
+        p = mannwhitneyu(fc[:, j], fb[:, j]).pvalue
+        res.append((g, fb[:, j].mean(), fc[:, j].mean(), fc[:, j].mean() - fb[:, j].mean(), p))
+    df = pd.DataFrame(res, columns=["gene", base, c, "difference", "p"]).sort_values("p")
+    df["p Holm"] = holm(df["p"].values)
+    print(f"Founder genomes, {c} vs {base} (most different first):")
+    show(df.head(12))
+    for label, f in [("independent origins of life", lambda r: r.get("origins", 0)),
+                     ("first cell's tick", lambda r: r["ms"].get("cell", np.nan)),
+                     ("founding replicator length (nt)", lambda r: np.mean([x["len"] for x in r.get("founders") or [{"len": np.nan}]]))]:
+        a = np.array([f(r) for r in by[base]], float); b = np.array([f(r) for r in by[c]], float)
+        a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+        p = mannwhitneyu(b, a).pvalue if len(a) > 2 and len(b) > 2 else np.nan
+        print(f"  {label}: {base} median {np.median(a):.1f}, {c} median {np.median(b):.1f} (p={p:.3g})")
+`),
+];
+
+const nb = {
+  cells,
+  metadata: { kernelspec: { display_name: 'Python 3', language: 'python', name: 'python3' }, language_info: { name: 'python' } },
+  nbformat: 4, nbformat_minor: 5,
+};
+fs.writeFileSync(out, JSON.stringify(nb, null, 1));
+console.log(`Wrote ${path.relative(root, out)} (${(fs.statSync(out).size / 1024).toFixed(0)} KB, ${files.size} simulation files, commit ${commit}${dirty})`);
