@@ -1,5 +1,6 @@
 // Fixed-locus genome. Trait genes live in [0,1]; behaviour/regulatory weights in [-1,1].
 import { RNG, hashSeq } from './rng.js';
+import { CFG } from './config.js';
 
 export const SIZE = 0, PHOTO = 1, CHEMO = 2, HETERO = 3, PRED = 4, MOTIL = 5, AEROBIC = 6,
   DIVTH = 7, ADHES = 8, SHARE = 9, ARMOR = 10, MUTR = 11, HUE = 12, LIFESPAN = 13, COLMAX = 14;
@@ -42,7 +43,7 @@ export function fromSequence(seq) {
   g[MUTR] = 0.3 + r.next() * 0.2;
   g[HUE] = r.next();
   g[LIFESPAN] = 0.3 + r.next() * 0.3;
-  g[COLMAX] = r.next() * 0.1;
+  g[COLMAX] = r.next() * CFG.COLMAX_INIT;
   g[TRANSL] = 0.15 + r.next() * 0.15;
   g[DNAG] = r.next() * 0.1;
   g[SEX] = 0.05 + r.next() * 0.1; // only expressed once a lineage becomes eukaryotic
