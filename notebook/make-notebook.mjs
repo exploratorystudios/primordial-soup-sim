@@ -70,10 +70,11 @@ CONFIGS = {
     # real1 that gave no complex life: eukaryotes were rare and died out. Staged tests showed oxygen poisons them
     # unless their mitochondria give them aerobic respiration (MITO_AER), which on Earth is what mitochondria do.
     # Reference without these: o2_x3_real in results-real1.jsonl (same seeds, 1001-1040).
-    "mito":            {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9},
+    # (SYMBIO_P and PRED_P are spelled out: since this run was set up, the defaults became 0.0005 and 0.4.)
+    "mito":            {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0, "PRED_P": 0.25},
     # ...plus mitochondria by partnership (host and aerobe in contact merge; no hunting needed), two rates:
-    "mito_sym_lo":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.0001},
-    "mito_sym_hi":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001},
+    "mito_sym_lo":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.0001, "PRED_P": 0.25},
+    "mito_sym_hi":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001, "PRED_P": 0.25},
     # ...plus predators catching prey more often (PRED_P 0.25 -> 0.4), so hunting pays and is less rare:
     "mito_sym_pred":   {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001, "PRED_P": 0.4},
 }
