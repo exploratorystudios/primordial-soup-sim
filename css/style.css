@@ -148,11 +148,25 @@ button.wide { width: 100%; margin-top: 8px; }
 .crumbs .follow.on { border-color: var(--accent); color: var(--accent); }
 
 #era-earth { color: var(--accent-2); font-size: 12px; margin-top: 2px; }
-#tour-caption {
-  position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); max-width: 720px;
-  background: rgba(4, 8, 15, 0.82); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px;
-  font-size: 15px; text-align: center; pointer-events: none;
+/* Tour (story mode): transitions with a timeline and rewind */
+#story {
+  position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); width: min(780px, calc(100% - 32px));
+  background: rgba(4, 8, 15, 0.9); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
 }
-#tour-caption b { display: block; font-size: 17px; margin-bottom: 2px; }
-#tour-caption[hidden] { display: none; }
+#story[hidden] { display: none; }
+.st-head { display: flex; gap: 6px; align-items: center; }
+#st-chapters { flex: 1; min-width: 0; }
+#st-cap { font-size: 14px; margin: 8px 0; }
+#st-cap b { display: block; font-size: 17px; margin-bottom: 2px; color: #fff; }
+.st-bar { display: flex; gap: 4px; align-items: center; }
+.st-bar button { min-width: 34px; padding: 4px 6px; }
+.st-bar button.glow { border-color: var(--accent-2); color: var(--accent-2); box-shadow: 0 0 10px rgba(255, 180, 84, 0.5); }
+.st-track { position: relative; flex: 1; margin: 0 6px; }
+#st-time { width: 100%; display: block; }
+#st-marker { position: absolute; top: -3px; width: 3px; height: calc(100% + 6px); margin-left: -1px; background: var(--accent-2); border-radius: 2px; pointer-events: none; }
+#st-tick { color: var(--muted); font-size: 12px; min-width: 170px; text-align: right; }
+#st-tick .now { color: var(--accent-2); }
+#st-status { color: var(--muted); font-size: 11px; }
+.st-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 8px; }
+.st-foot .check { font-size: 11px; color: var(--muted); margin: 0; }
 button.active { border-color: var(--accent-2); color: var(--accent-2); }

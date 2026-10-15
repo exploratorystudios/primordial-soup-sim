@@ -264,7 +264,7 @@ export class Life {
       const fromOrganism = c.orgSize >= 8;
       for (const o of c.bonds.slice()) unlink(c, o);
       c.type = T_GENERIC; c.orgSize = 1; c.org = c.id;
-      if (fromOrganism && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell buds off to found the next generation of a multicellular organism');
+      if (fromOrganism && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell buds off to found the next generation of a multicellular organism', c);
     }
 
     if (c.energy > c.cap * c.divFrac && c.nut >= c.nutNeed && c.age > CFG.MIN_DIV_AGE && this.cells.length + this.newborns.length < CFG.MAX_CELLS) {
@@ -332,7 +332,8 @@ export class Life {
         mate.energy -= mate.cap * CFG.SEX_COST;
         c.energy -= c.cap * CFG.SEX_COST;
         this.sexualBirths++;
-        this.w.milestone('sex', 'Sexual reproduction: two eukaryotes combine their genomes');
+        this.w.emit('mate', 40, { a: c, b: mate });
+        this.w.milestone('sex', 'Sexual reproduction: two eukaryotes combine their genomes', c);
       }
     }
     // DNA polymerases proofread; RNA copying is sloppy.
@@ -451,7 +452,7 @@ export class Life {
     const o2f = Math.min(1, F.get(F.oxygen, a.x, a.y) / CFG.O2_REF);
     const resp = 1 + a.aer * CFG.AERO_BONUS * o2f * (a.mito ? 2.5 : 1);
     a.energy = Math.min(a.cap, a.energy + (Math.max(0, b.energy) * 0.6 + b.m * 6) * (0.6 + 0.4 * resp) * a.prot);
-    this.w.milestone('predator', 'The first predator engulfs another cell');
+    this.w.milestone('predator', 'The first predator engulfs another cell', a);
     a.nut += b.nut;
     b.nut = 0;
     if (a.nut > a.nutNeed) { F.add(F.nutrient, a.x, a.y, a.nut - a.nutNeed); a.nut = a.nutNeed; }
@@ -467,14 +468,14 @@ export class Life {
       a.rTarget = a.r; a.r = r0; this.resize(a); // grows into a eukaryote rather than popping
       a.species = this.newSpecies(a, a.species).id;
       this.species.get(a.species).euk = true;
-      this.w.milestone('eukaryote', 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote');
+      this.w.milestone('eukaryote', 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote', a);
     } else if (a.mito && !a.plastid && b.effP > 0.25 && rng.next() < CFG.ENDO_P) {
       a.plastid = true;
       b.endosymbiont = true;
       decode(a);
       a.species = this.newSpecies(a, a.species).id;
       this.species.get(a.species).euk = true;
-      this.w.milestone('plastid', 'A eukaryote keeps a photosynthetic cell as a chloroplast: the first alga');
+      this.w.milestone('plastid', 'A eukaryote keeps a photosynthetic cell as a chloroplast: the first alga', a);
     }
     b.next = a;
     b.nextWhy = b.endosymbiont ? `was swallowed by cell #${a.id} and lives on inside it as an organelle` : `was swallowed by cell #${a.id}`;
@@ -493,7 +494,8 @@ export class Life {
     to.g = new Float32Array(to.g);
     to.g[i] = from.g[i];
     decode(to);
-    this.w.milestone('hgt', 'Horizontal gene transfer: two microbes swap genes');
+    this.w.emit('hgt', 40, { a: from, b: to });
+    this.w.milestone('hgt', 'Horizontal gene transfer: two microbes swap genes', to);
   }
 
   physics() {

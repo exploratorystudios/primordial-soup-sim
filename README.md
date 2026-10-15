@@ -20,6 +20,7 @@ Check that every stage of evolution still emerges (and how often), across many w
 ```bash
 npm run check -- --seeds 1-8 --ticks 70000          # table of when each milestone happened, per seed
 node check-evolution.mjs --seeds 1-20 --md tape.md  # also write a markdown report
+node check-replay.mjs 1                            # save/restore replays exactly (the tour's rewind relies on it)
 ```
 
 Headless (no browser), useful for tuning:
@@ -52,7 +53,7 @@ narration in `video/make-script.mjs` together, then regenerate the script so the
 - **Click** selects the outermost thing under the cursor (an organism, protocell, strand, molecule or virus). **Click again inside the selection** to select the part under the cursor, one level deeper; click inside a parent to pick a sibling; click outside to start over. **Esc** goes up a level. Clicking never moves the camera.
 - **F** (or the inspector's Follow button) locks the camera onto the selection, so it stays still in the middle of the screen however it moves. Following stays on until you press F or the button again: pan anywhere you like, even right away from it, and the view keeps moving with it as if you were riding along (zooming then works at the cursor as usual); whatever you select next is followed too. Press F twice to re-centre it
 - **Space** pause · **+ / -** speed. At speeds below one tick per frame, motion is smoothly interpolated between ticks; paused means truly frozen.
-- **⏭ Next milestone** runs at full speed until something new happens · **Tour** flies the camera through what exists in this world, with captions
+- **⏭ Next milestone** runs at full speed until something new happens · **Tour** lets you watch every transition this world went through (see below)
 - **Save world / Load world** write and resume a compressed `.json.gz` snapshot; a resumed world continues exactly as the original would have
 - Colour cells by metabolism, by species (neutral pigment gene, so related lineages share a hue), or by cell type
 - Overlays show vent chemicals, organic matter, oxygen and nutrients
@@ -113,6 +114,30 @@ time, so they freeze when paused and can be watched slowly at low speed:
 
 These run faster in well-fed cells and in cells with more translation machinery. They are drawn from each cell's state rather than simulated molecule by molecule (an exact simulation of a cell's chemistry is far beyond a browser), so they never change the outcome of a run.
 
+## The tour: watch every transition
+
+**Tour** replays the current seed from the very beginning in the background and finds one clear
+example of every transition that happened in it, in order:
+
+molecules forming at a vent → two nucleotides bonding → a chain growing → RNA copying itself → a
+membrane bubble forming → RNA copying inside a protocell → a protocell dividing → the first living
+cell → cell division → proteins (ribosomes at work) → DNA (transcription and replication) → the first
+predator → the first viruses → infection → a cell bursting → gene swapping → photosynthesis → the
+Great Oxidation Event (a time-lapse with the oxygen overlay) → endosymbiosis and the first eukaryote →
+the first alga → sex → the first colony → a multicellular organism → a complex organism → the next
+generation budding off.
+
+Each chapter restores the world shortly before the moment and follows what it happens to (and what it
+turns into: a protocell into a cell, prey into its predator). Chapters appear as they are found, so
+you can start watching within seconds while the search carries on. Not every world gets through every
+transition; the list shows which ones didn't happen.
+
+- **Timeline**: drag to scrub; the orange mark is the moment itself. **◀◀ / ▶▶** (or ← / →) jump back
+  and forward, **↺** replays the scene, **⏮ / ⏭** change chapter, **◎ Subject** re-centres on it.
+- The camera stays yours: pan, zoom, select other things and change the speed as usual.
+- Rewinding restores a snapshot from the search and replays forward, so you see exactly the same
+  history every time (`node check-replay.mjs` checks this). **✕ Exit** returns to your own world.
+
 ## What is modelled
 
 ### 1. Prebiotic chemistry (`js/chemistry.js`)
@@ -153,10 +178,11 @@ These run faster in well-fed cells and in cells with more translation machinery.
 | `js/genome.js` | gene layout, mutation, recombination, genetic distance |
 | `js/viruses.js` | virus particles, infection, lysis, transduction |
 | `js/persist.js` | save / load worlds |
-| `js/tour.js` | guided camera tour |
+| `js/story.js`, `js/story-scout.js`, `js/story-chapters.js` | the tour: finding each transition in the world's history (a Web Worker), and playing it back with rewind |
 | `js/fields.js`, `js/spatial.js` | diffusing chemical grids, spatial hash |
 | `js/render.js` | true-scale renderer with semantic zoom (molecules, bilayers, organelles) |
 | `js/parts.js` | part hierarchy for the inspector, deep picking |
 | `js/ui.js`, `js/main.js` | side panel, main loop, camera and input |
 | `headless.js` | run one world without a browser |
+| `check-replay.mjs` | strict check that a restored snapshot continues exactly like the original |
 | `check-evolution.mjs` | "replay the tape of life": many seeds in parallel, reports when each stage emerged |

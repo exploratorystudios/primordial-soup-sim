@@ -16,7 +16,25 @@
         <div id="era-earth"></div>
       </div>
       <div id="toast-area"></div>
-      <div id="tour-caption" hidden></div>
+      <div id="story" hidden>
+        <div class="st-head">
+          <select id="st-chapters" title="Jump to a transition"></select>
+          <button id="st-subject" title="Back to the subject of this scene">◎ Subject</button>
+          <button id="st-exit" title="Leave the tour and return to your own world">✕ Exit</button>
+        </div>
+        <div id="st-cap"></div>
+        <div class="st-bar">
+          <button id="st-prev" title="Previous transition">⏮</button>
+          <button id="st-replay" title="Replay this scene from the start">↺</button>
+          <button id="st-back" title="Rewind (←)">◀◀</button>
+          <button id="st-play" title="Play / pause">❚❚</button>
+          <button id="st-fwd" title="Skip ahead (→)">▶▶</button>
+          <button id="st-next" title="Next transition">⏭</button>
+          <div class="st-track"><input id="st-time" type="range" min="0" max="1" value="0"><div id="st-marker" title="The moment it happens"></div></div>
+          <span id="st-tick"></span>
+        </div>
+        <div class="st-foot"><span id="st-status"></span><label class="check"><input id="st-auto" type="checkbox" checked> Auto-play next</label></div>
+      </div>
       <div id="hint">Scroll to zoom · drag to pan · click to select, click again inside to go deeper · Esc up a level · F follow · Space pause</div>
     </main>
 
@@ -39,7 +57,7 @@
         </div>
         <div class="row">
           <button id="btn-seek" title="Run at full speed until the next milestone">⏭ Next milestone</button>
-          <button id="btn-tour" title="A guided camera tour of what lives in this world">Tour</button>
+          <button id="btn-tour" title="Watch every transition this world went through, from molecules to multicellular life, with rewind">Tour</button>
         </div>
         <div class="row">
           <button id="btn-save" title="Download this world as a file">Save world</button>

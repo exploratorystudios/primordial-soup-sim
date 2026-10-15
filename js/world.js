@@ -202,8 +202,10 @@ export class World {
     if (st.multiSpecies >= 5) this.milestone('cambrian', 'Five or more species of multicellular organisms coexist');
   }
 
-  milestone(key, text) {
+  // subj: what the milestone happened to (not saved; the story mode's search uses it to know what to follow).
+  milestone(key, text, subj = null) {
     if (this.mset.has(key)) return;
+    this.msSubject = subj;
     this.mset.add(key);
     this.milestones.push({ key, text, t: this.t });
     this.log(text, true);

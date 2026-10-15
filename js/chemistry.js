@@ -18,6 +18,7 @@ export class Soup {
     this.mdead = new Uint8Array(M);
     this.mid = new Int32Array(M); // stable identity, so a single molecule can be followed
     this.nextMid = 1;
+    this.nextPid = 1; // stable ids for strands (used to find the same strand again after a rewind)
     this.n = 0;
     this.builtN = 0;
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.HASH_CELL);
@@ -76,7 +77,7 @@ export class Soup {
 
   // ---------------------------------------------------------------- polymers
   makePolymer(seq, x, y) {
-    const p = { x, y, ang: this.world.rng.next() * 6.283, seq, act: 0, fid: 0.8, stab: 0, prog: 0, copy: [], dead: false };
+    const p = { id: this.nextPid++, x, y, ang: this.world.rng.next() * 6.283, seq, act: 0, fid: 0.8, stab: 0, prog: 0, copy: [], dead: false };
     this.evalPolymer(p);
     return p;
   }
@@ -171,14 +172,14 @@ export class Soup {
       while (rate > 0) {
         if (rng.next() < rate) {
           const t = rng.next() < CFG.LIPID_FRACTION ? LIPID : rng.int(4);
-          this.addMonomer(v.x + rng.gauss() * 10, CFG.H - 12 - rng.next() * 10, t);
+          if (this.addMonomer(v.x + rng.gauss() * 10, CFG.H - 12 - rng.next() * 10, t)) w.emit('spawn', 20, { mid: this.nextMid - 1, x: this.mx[this.n - 1], y: this.my[this.n - 1], vent: true });
         }
         rate -= 1;
       }
     }
     if (rng.next() < CFG.SURFACE_MONOMER_RATE) {
       const t = rng.next() < CFG.LIPID_FRACTION * 0.5 ? LIPID : rng.int(4);
-      this.addMonomer(rng.next() * CFG.W, rng.next() * 40, t);
+      if (this.addMonomer(rng.next() * CFG.W, rng.next() * 40, t)) w.emit('spawn', 20, { mid: this.nextMid - 1, x: this.mx[this.n - 1], y: this.my[this.n - 1], vent: false });
     }
   }
 
@@ -224,7 +225,7 @@ export class Soup {
         this.world.emit('vform', 25, { v: nv, pts: [[x, y], ...nb.map((j) => [mx[j], my[j]])] });
         this.kill(i, nv, 'helped form a new membrane vesicle');
         for (const j of nb) this.kill(j, nv, 'helped form a new membrane vesicle');
-        this.world.milestone('vesicle', 'Lipids self-assemble into the first membrane vesicle');
+        this.world.milestone('vesicle', 'Lipids self-assemble into the first membrane vesicle', nv);
       }
     }
   }
@@ -242,6 +243,7 @@ export class Soup {
       const j = this.findMonomer(x, y, 4, -1);
       if (j < 0) { md[i] = 0; continue; }
       const dimer = this.makePolymer([mt[i], mt[j]], x, y);
+      this.world.emit('bond', 14, { p: dimer, a: this.mid[i], ax: this.mx[i], ay: this.my[i], bx: this.mx[j], by: this.my[j], ta: mt[i], tb: mt[j] });
       this.kill(i, dimer, 'joined another nucleotide to start a new chain');
       this.kill(j, dimer, 'joined another nucleotide to start a new chain');
       this.newPolys.push(dimer);
@@ -286,8 +288,8 @@ export class Soup {
             if (this.canAddPolymer()) {
               const kid = this.makePolymer(seq, p.x + rng.range(-3, 3), p.y + rng.range(-3, 3));
               this.newPolys.push(kid);
-              this.world.emit('peel', 20, { kid, x: p.x, y: p.y });
-              w.milestone('replicator', 'A ribozyme copies itself: the RNA world begins');
+              this.world.emit('peel', 20, { kid, parent: p, x: p.x, y: p.y });
+              w.milestone('replicator', 'A ribozyme copies itself: the RNA world begins', p);
             }
           }
         }
@@ -299,7 +301,7 @@ export class Soup {
         this.breakPolymer(p, null);
         continue;
       }
-      if (p.seq.length >= 5) w.milestone('polymer', 'Monomers link into the first long polymer chain');
+      if (p.seq.length >= 5) w.milestone('polymer', 'Monomers link into the first long polymer chain', p);
       out.push(p);
     }
     for (const p of pending) out.push(p);
@@ -391,7 +393,7 @@ export class Soup {
         for (const p of v.polys) if (p.act > 0) { active++; if (!best || p.act > best.act) best = p; }
         if (best && best.act >= CFG.CELL_ACT && active >= 2) {
           const cell = w.life.spawnFromProtocell(v, best);
-          w.emit('abio', 60, { cell, vr: v.r });
+          w.emit('abio', 60, { cell, v, vr: v.r });
           v.dead = true; v.next = cell; v.nextWhy = 'became a living cell!';
           for (const q of v.polys) { q.dead = true; q.next = cell; q.nextWhy = q === best ? 'became the genome of the first cell in its lineage' : 'ended up inside a new living cell'; }
           continue;
@@ -436,7 +438,7 @@ export class Soup {
             const seq = this.finishCopy(p);
             polys.push(Object.assign(this.makePolymer(seq, v.x, v.y), { home: v }));
             v.copies++;
-            this.world.milestone('replicator', 'A ribozyme copies itself: the RNA world begins');
+            this.world.milestone('replicator', 'A ribozyme copies itself: the RNA world begins', p);
           }
         }
       }
@@ -471,12 +473,12 @@ export class Soup {
     // Follow the daughter that inherited more of the contents.
     v.dead = true;
     v.next = a.polys.length >= b.polys.length ? a : b;
-    this.world.emit('vsplit', 25, { a, b });
+    this.world.emit('vsplit', 25, { a, b, v });
     v.nextWhy = 'divided in two; following the daughter with more RNA';
     for (let t = 0; t < 4; t++) { a.pool[t] = v.pool[t] >> 1; b.pool[t] = v.pool[t] - a.pool[t]; }
     a.copies = b.copies = v.copies; // replication history of the lineage
     if (a.polys.some((p) => p.act > 0) || b.polys.some((p) => p.act > 0)) {
-      this.world.milestone('protocell', 'A vesicle carrying replicators divides: the first protocell');
+      this.world.milestone('protocell', 'A vesicle carrying replicators divides: the first protocell', v);
     }
     return [a, b];
   }

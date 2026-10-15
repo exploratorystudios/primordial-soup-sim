@@ -29,8 +29,10 @@ export class Viruses {
       const host = L.cells[rng.int(L.cells.length)];
       if (host && !host.dead) {
         this.lineages++;
-        for (let k = 0; k < 6; k++) this.list.push(this.make(host.x + rng.range(-host.r, host.r), host.y + rng.range(-host.r, host.r), host.g[Gn.REC1], host.g[Gn.REC2], this.lineages, null));
-        w.milestone('virus', 'The first virus: a selfish genetic element escapes its host');
+        const born = [];
+        for (let k = 0; k < 6; k++) { const v = this.make(host.x + rng.range(-host.r, host.r), host.y + rng.range(-host.r, host.r), host.g[Gn.REC1], host.g[Gn.REC2], this.lineages, null); this.list.push(v); born.push(v); }
+        w.emit('vescape', 45, { host, vs: born });
+        w.milestone('virus', 'The first virus: a selfish genetic element escapes its host', host);
         w.log(`Virus lineage #${this.lineages} emerges`);
       }
     }
@@ -68,7 +70,7 @@ export class Viruses {
             w.life.redecode(c);
           } else {
             v.nextWhy = `injected its genome into cell #${c.id}`;
-            w.emit('inject', 40, { cell: c, x: v.x, y: v.y });
+            w.emit('inject', 40, { cell: c, v, x: v.x, y: v.y });
             c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
             this.stats.infections++;
           }

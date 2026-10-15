@@ -20,7 +20,7 @@ function unb64(str, Type) {
   return new Type(bytes.buffer, 0, bytes.byteLength / Type.BYTES_PER_ELEMENT);
 }
 
-const polyOut = (p) => ({ x: p.x, y: p.y, ang: p.ang, seq: p.seq, prog: p.prog, copy: p.copy });
+const polyOut = (p) => ({ id: p.id, x: p.x, y: p.y, ang: p.ang, seq: p.seq, prog: p.prog, copy: p.copy });
 
 export function serialize(w) {
   const F = w.fields, soup = w.soup, L = w.life, n = soup.n;
@@ -31,7 +31,7 @@ export function serialize(w) {
     record: { milestones: w.milestones, logs: w.logs, history: w.history, historyEvery: w.historyEvery },
     soup: {
       n, mx: b64(soup.mx.slice(0, n)), my: b64(soup.my.slice(0, n)), mt: b64(soup.mt.slice(0, n)), mid: b64(soup.mid.slice(0, n)),
-      nextMid: soup.nextMid, vesId: soup.vesId, landscape: b64(soup.landscape), stats: soup.stats,
+      nextMid: soup.nextMid, nextPid: soup.nextPid, vesId: soup.vesId, landscape: b64(soup.landscape), stats: soup.stats,
       polymers: soup.polymers.map(polyOut),
       vesicles: soup.vesicles.map((v) => ({ id: v.id, x: v.x, y: v.y, L: v.L, gen: v.gen, copies: v.copies, age: v.age, pool: v.pool, polys: v.polys.map(polyOut) })),
     },
@@ -70,7 +70,8 @@ export function deserialize(d) {
   soup.mdead.fill(0);
   soup.nextMid = S.nextMid; soup.stats = S.stats;
   soup.landscape.set(unb64(S.landscape, Float32Array));
-  const polyIn = (q) => { const p = { x: q.x, y: q.y, ang: q.ang, seq: q.seq, act: 0, fid: 0.8, stab: 0, prog: q.prog, copy: q.copy, dead: false }; soup.evalPolymer(p); return p; };
+  soup.nextPid = S.nextPid || 1;
+  const polyIn = (q) => { const p = { id: q.id ?? soup.nextPid++, x: q.x, y: q.y, ang: q.ang, seq: q.seq, act: 0, fid: 0.8, stab: 0, prog: q.prog, copy: q.copy, dead: false }; soup.evalPolymer(p); return p; };
   soup.polymers = S.polymers.map(polyIn);
   soup.vesicles = S.vesicles.map((v) => ({ ...soup.makeVesicle(v.x, v.y, v.L, v.gen), id: v.id, copies: v.copies, age: v.age, pool: v.pool, polys: v.polys.map(polyIn) }));
   soup.vesId = S.vesId; // after makeVesicle, which advances the counter
@@ -93,7 +94,8 @@ export function deserialize(d) {
   L.organisms = D.organisms; L.stamp = D.stamp; // keep cell fates exactly as they were
 
   Object.assign(w.viruses, { list: d.viruses.list.map((v) => ({ ...v, x0: v.x, y0: v.y })), nextId: d.viruses.nextId, lineages: d.viruses.lineages, stats: d.viruses.stats });
-  w.updateCurrents();
+  // Currents are cached and refreshed every 20 ticks: rebuild the cache as it was at the last refresh.
+  { const t = w.t; w.t = t - (t % 20); w.updateCurrents(); w.t = t; }
   return w;
 }
 

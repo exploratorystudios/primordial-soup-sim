@@ -353,6 +353,7 @@ export class Renderer {
 
     for (const p of soup.polymers) {
       if (!this.inView(p.x, p.y, p.seq.length * DIM.ntRise * NM)) continue;
+      if (p._bondFx && p._bondFx.u < 0.85) continue; // still being assembled (drawFx)
       const ang = this.freeAngle(p), j = this.jig(p._ph * 977, 0.6);
       p._rx = p.x + j.x; p._ry = p.y + j.y; // where it is drawn this frame
       if (p._peel) { const k = ease(p._peel.u); p._rx = p._peel.x + (p._rx - p._peel.x) * k; p._ry = p._peel.y + (p._ry - p._peel.y) * k; }
@@ -494,12 +495,16 @@ export class Renderer {
       if (u < 0 || u > 1) {
         if (e.type === 'peel' && e.kid._peel === e) e.kid._peel = null;
         if (e.type === 'copy' && e.p._copyFx === e) e.p._copyFx = null;
+        if (e.type === 'bond' && e.p._bondFx === e) e.p._bondFx = null;
+        if (e.type === 'vescape') for (const v of e.vs) if (v._esc === e) v._esc = null;
         continue;
       }
       e.u = u;
       this.fxNow.push(e);
       if (e.type === 'peel') e.kid._peel = e;
       if (e.type === 'copy') e.p._copyFx = e;
+      if (e.type === 'bond') e.p._bondFx = e;
+      if (e.type === 'vescape') for (const v of e.vs) v._esc = e;
     }
   }
 
@@ -653,13 +658,93 @@ export class Renderer {
           break;
         }
         case 'abio': {
-          // A protocell becomes a living cell: a pulse of light as its machinery switches on.
+          // A protocell becomes a living cell: its loose membrane draws in around the new cell, then a
+          // pulse of light as its machinery switches on.
           const c = e.cell;
-          if (c.dead || !this.inView(c.x, c.y, c.r * 6)) break;
+          if (c.dead || !this.inView(c.x, c.y, Math.max(c.r * 6, e.vr * 1.5))) break;
+          if (e.vr > c.r) {
+            const shrink = ease(Math.min(1, u * 1.6)), rr = e.vr + (c.r - e.vr) * shrink;
+            ctx.globalAlpha = 0.5 * (1 - shrink) + 0.1;
+            ctx.fillStyle = 'rgba(255,179,240,0.25)';
+            ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, rr, 0, TAU); ctx.fill();
+            ctx.strokeStyle = 'rgba(245,232,180,0.9)'; ctx.lineWidth = Math.max(DIM.bilayer * NM, px);
+            ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, rr, 0, TAU); ctx.stroke();
+          }
           ctx.globalAlpha = 1 - u;
           ctx.strokeStyle = '#ffe58a';
           ctx.lineWidth = Math.max(c.r * 0.15, px * 2);
           ctx.beginPath(); ctx.arc(c.x - cx, c.y - cy, c.r * (1 + 3 * k), 0, TAU); ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'spawn': {
+          // Vent chemistry makes a new nucleotide: a brief glow where it forms.
+          if (this.pxnm < 0.4 || !this.inView(e.x, e.y, 10 * NM)) break;
+          ctx.globalAlpha = 0.8 * (1 - u);
+          ctx.strokeStyle = '#ffe7a0';
+          ctx.lineWidth = Math.max(0.4 * NM, px);
+          ctx.beginPath(); ctx.arc(e.x - cx, e.y - cy, (1 + 6 * k) * NM, 0, TAU); ctx.stroke();
+          ctx.fillStyle = '#fff4c8';
+          ctx.globalAlpha = 0.6 * (1 - k);
+          ctx.beginPath(); ctx.arc(e.x - cx, e.y - cy, 1.2 * NM, 0, TAU); ctx.fill();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case 'bond': {
+          // Two nucleotides glide together and link up: the start of a chain.
+          const p = e.p;
+          if (p.dead || this.pxnm < 2 || !this.inView(p.x, p.y, 8 * NM)) break;
+          if (u >= 0.85) break;
+          const kk = ease(Math.min(1, u / 0.85)), ang = p.ang, dx = Math.cos(ang) * 0.35 * NM, dy = Math.sin(ang) * 0.35 * NM;
+          this.drawMonomer(e.ax + (p.x - dx - e.ax) * kk, e.ay + (p.y - dy - e.ay) * kk, e.ta, ang + (1 - kk) * 2);
+          this.drawMonomer(e.bx + (p.x + dx - e.bx) * kk, e.by + (p.y + dy - e.by) * kk, e.tb, ang - (1 - kk) * 2);
+          break;
+        }
+        case 'vescape': {
+          // The first virus: new capsids bud out through the host's membrane and drift away.
+          const h = e.host;
+          if (!this.inView(h.x, h.y, h.r * 4)) break;
+          ctx.globalAlpha = 0.6 * (1 - u);
+          ctx.strokeStyle = '#d4ff6a';
+          ctx.lineWidth = Math.max(h.r * 0.05, px);
+          ctx.beginPath(); ctx.arc(h.x - cx, h.y - cy, h.r * (1 + 0.15 * Math.sin(u * Math.PI)), 0, TAU); ctx.stroke();
+          ctx.globalAlpha = 1;
+          const R = DIM.virus * NM;
+          e.vs.forEach((v, i) => {
+            if (v.dead) return;
+            const a = (i / e.vs.length) * TAU + h.id, sx = h.x + Math.cos(a) * h.r * 0.5, sy = h.y + Math.sin(a) * h.r * 0.5;
+            const x = sx + (v.x - sx) * k, y = sy + (v.y - sy) * k;
+            if (R * this.ppu < 1.5) { const q = Math.max(R, 0.65 * px); ctx.fillStyle = '#d4ff6a'; ctx.fillRect(x - cx - q, y - cy - q, 2 * q, 2 * q); }
+            else this.drawVirus(x, y, v.ang);
+          });
+          break;
+        }
+        case 'mate': {
+          // Two eukaryotes fuse briefly and exchange genomes.
+          const a = e.a, b = e.b;
+          if (a.dead || b.dead || !this.inView((a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(a.x - b.x, a.y - b.y) + a.r * 2)) break;
+          const wdt = Math.min(a.r, b.r) * 0.45 * Math.sin(u * Math.PI);
+          ctx.strokeStyle = a.trophColor; ctx.globalAlpha = 0.75; ctx.lineCap = 'round';
+          ctx.lineWidth = Math.max(wdt * 2, px);
+          ctx.beginPath(); ctx.moveTo(a.x - cx, a.y - cy); ctx.lineTo(b.x - cx, b.y - cy); ctx.stroke();
+          ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+          const r = Math.max(Math.min(a.r, b.r) * 0.18, 1.5 * px);
+          for (const [p, q, col] of [[a, b, '#ffd166'], [b, a, '#9ad7ff']]) {
+            ctx.fillStyle = col;
+            ctx.beginPath(); ctx.arc(p.x + (q.x - p.x) * k * 0.5 - cx, p.y + (q.y - p.y) * k * 0.5 - cy, r, 0, TAU); ctx.fill();
+          }
+          break;
+        }
+        case 'hgt': {
+          // Conjugation: a thin pilus joins two bacteria and a stretch of DNA crosses over.
+          const a = e.a, b = e.b;
+          if (a.dead || b.dead || !this.inView((a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(a.x - b.x, a.y - b.y) + a.r * 2)) break;
+          ctx.globalAlpha = Math.min(1, 4 * Math.min(u, 1 - u) + 0.2);
+          ctx.strokeStyle = 'rgba(200,220,255,0.9)';
+          ctx.lineWidth = Math.max(8 * NM, px);
+          ctx.beginPath(); ctx.moveTo(a.x - cx, a.y - cy); ctx.lineTo(b.x - cx, b.y - cy); ctx.stroke();
+          ctx.fillStyle = '#ffd166';
+          ctx.beginPath(); ctx.arc(a.x + (b.x - a.x) * k - cx, a.y + (b.y - a.y) * k - cy, Math.max(Math.min(a.r, b.r) * 0.15, 1.5 * px), 0, TAU); ctx.fill();
           ctx.globalAlpha = 1;
           break;
         }
@@ -1457,10 +1542,10 @@ export class Renderer {
     if (R * this.ppu < 1.5) {
       ctx.fillStyle = '#d4ff6a';
       const h = Math.max(R, 0.65 * this.px);
-      for (const v of list) if (this.inView(v.x, v.y, R * 4)) ctx.fillRect(v.x - cx - h, v.y - cy - h, 2 * h, 2 * h);
+      for (const v of list) if (!v._esc && this.inView(v.x, v.y, R * 4)) ctx.fillRect(v.x - cx - h, v.y - cy - h, 2 * h, 2 * h);
       return;
     }
-    for (const v of list) if (this.inView(v.x, v.y, R * 4)) this.drawVirus(v.x, v.y, v.ang);
+    for (const v of list) if (!v._esc && this.inView(v.x, v.y, R * 4)) this.drawVirus(v.x, v.y, v.ang);
   }
 
   // A tailed bacteriophage: icosahedral head (~100 nm), contractile tail, tail fibres.

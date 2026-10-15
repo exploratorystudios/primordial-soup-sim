@@ -5,7 +5,7 @@ import { Renderer, NM_PER_UNIT, DIM } from './render.js';
 import { UI } from './ui.js';
 import { fovFor, centreOf, topLevelAt, childAt, contains, ancestors, sel as mkSel, crumbLabel } from './parts.js';
 import { Cell } from './life.js';
-import { Tour } from './tour.js';
+import { Story } from './story.js';
 import { saveToFile, loadFromFile } from './persist.js';
 
 const SPEEDS = [0.25, 1, 2, 5, 10, 20, 50, 100, 250]; // ticks per frame
@@ -36,7 +36,7 @@ setSpeed(+params.get('speed') || speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
 
 function newWorld(s) {
-  if (typeof tour !== 'undefined') tour.stop();
+  if (typeof story !== 'undefined') story.stop();
   seed = s;
   world = new World(seed);
   ui.reset();
@@ -46,7 +46,19 @@ function newWorld(s) {
 
 let seeking = null; // { from: milestone count, start: tick } while jumping to the next milestone
 let lastNow = performance.now();
-const tour = new Tour(renderer, ui, () => $('btn-tour').classList.remove('active'));
+// The tour (story mode) swaps in replayed worlds and drives the clock, but leaves the camera free.
+const story = new Story({
+  get world() { return world; },
+  get running() { return running; },
+  opts,
+  ui,
+  renderer,
+  setWorld(w) { world = w; ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null; flight = null; acc = 0; alpha = 1; },
+  setRunning(b) { running = b; $('btn-play').textContent = running ? 'Pause' : 'Play'; },
+  setSpeed,
+  setOverlay(o) { opts.overlay = o; $('overlay').value = o; },
+  follow: storyFollow,
+});
 
 function loop() {
   frameStep();
@@ -76,7 +88,8 @@ function frameStep() {
     world.smooth = SPEEDS[speedIdx] < 1; // only pay for in-between frames when they're visible
   }
   // Draw everything partway between ticks (the simulation itself never sees these positions).
-  tour.update(dt);
+  story.update(dt);
+  $('btn-tour').classList.toggle('active', story.active);
   world.beginInterp(alpha);
   opts.time = world.t - 1 + alpha;
   renderer.time = opts.time;
@@ -94,7 +107,7 @@ function frameStep() {
     ui.lastHTML = null;
   }
   if (flight) fly(dt);
-  else if (sel && sel.follow && !sel.gone && !tour.active) chase(sel, dt);
+  else if (sel && sel.follow && !sel.gone) chase(sel, dt);
   if (opts.flash) { opts.flash.a -= 0.02; if (opts.flash.a <= 0) opts.flash = null; }
   renderer.draw(world, opts);
   ui.update(world, frame);
@@ -112,13 +125,14 @@ function stopSeek() {
 }
 $('btn-seek').onclick = () => {
   if (seeking) { stopSeek(); return; }
+  if (story.active) return; // the tour's worlds are replays: jumping ahead would leave the scene
   seeking = { from: world.milestones.length, start: world.t };
   $('btn-seek').classList.add('active');
 };
 $('btn-tour').onclick = () => {
-  if (tour.active) { tour.stop(); return; }
-  $('btn-tour').classList.add('active');
-  tour.start(world);
+  if (story.active) { story.stop(); return; }
+  stopSeek();
+  story.start(seed);
 };
 $('btn-save').onclick = async () => {
   const bytes = await saveToFile(world);
@@ -131,7 +145,7 @@ $('file-load').onchange = async (e) => {
   if (!f) return;
   try {
     const w = await loadFromFile(f);
-    tour.stop(); stopSeek();
+    story.stop(); stopSeek();
     world = w;
     seed = w.seed;
     $('seed').value = seed;
@@ -176,6 +190,8 @@ window.addEventListener('keydown', (e) => {
     goUp();
   }
   else if (e.key === 'f' || e.key === 'F') toggleFollow();
+  else if (story.active && e.key === 'ArrowLeft') { e.preventDefault(); $('st-back').click(); }
+  else if (story.active && e.key === 'ArrowRight') { e.preventDefault(); $('st-fwd').click(); }
   else if (e.key === '+' || e.key === '=') setSpeed(Math.min(SPEEDS.length - 1, speedIdx + 1));
   else if (e.key === '-') setSpeed(Math.max(0, speedIdx - 1));
 });
@@ -186,7 +202,6 @@ window.addEventListener('resize', () => renderer.resize());
 let drag = null;
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  tour.stop();
   flight = null;
   const r = canvas.getBoundingClientRect();
   const f = Math.exp(-e.deltaY * 0.0015);
@@ -206,8 +221,7 @@ canvas.addEventListener('pointermove', (e) => {
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   drag.moved += Math.abs(dx) + Math.abs(dy);
   if (drag.moved > 4) {
-    tour.stop();
-    flight = null;
+      flight = null;
     canvas.classList.add('dragging');
     renderer.pan(dx, dy);
     reframe(); // while following, dragging moves where the subject sits on screen, and it stays there
@@ -286,6 +300,21 @@ function startFollow(sel) {
   try { c = centreOf(sel); } catch { /* parts without a centre are followed by their body */ }
   sel.offset = { x: c.x - t.x, y: c.y - t.y };
   sel.pan = { x: renderer.cam.x - c.x, y: renderer.cam.y - c.y, hold: false }; // glides into the centre
+}
+
+// The tour hands over what to look at: follow s (keeping a given pan, or centred at a field of view),
+// or with no subject just look at a place.
+function storyFollow(s, view = {}) {
+  flight = null;
+  if (view.fov) renderer.setFieldWidthNm(view.fov);
+  if (!s) { renderer.cam.x = view.x; renderer.cam.y = view.y; ui.select(world, null); return; }
+  ui.select(world, s);
+  followOn = s.follow = true;
+  startFollow(s);
+  s.pan = view.pan ? { ...view.pan } : { x: 0, y: 0, hold: false };
+  const t = followTarget(s), o = s.offset;
+  renderer.cam.x = t.x + o.x + s.pan.x; renderer.cam.y = t.y + o.y + s.pan.y;
+  ui.lastHTML = null;
 }
 
 function chase(sel, dt) {
@@ -408,6 +437,6 @@ ui.onUp = goUp;
 function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT; }
 
 // Console handle for tinkering, e.g. soup.world.life.cells.length
-window.soup = { get world() { return world; }, renderer, ui, opts, tour, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
+window.soup = { get world() { return world; }, renderer, ui, opts, story, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
 
 requestAnimationFrame(loop);
