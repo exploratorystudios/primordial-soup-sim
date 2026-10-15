@@ -55,7 +55,7 @@ if (args.worker !== undefined) {
   const st = w.life.stats;
   const ms = Object.fromEntries(w.milestones.map((m) => [m.key, m.t]));
   console.log(JSON.stringify({
-    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000, ticks: w.t, origins: w.life.origins, founders,
+    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000, ticks: w.t, node: process.version, cfg: args.cfg ? JSON.parse(args.cfg) : {}, origins: w.life.origins, founders,
     geneNames: args.genes ? Gn.GENE_NAMES.slice(0, Gn.DIFF) : undefined,
     final: { cells: w.life.cells.length, peakCells, species: st.speciesAlive, euk: st.euk, multi: st.multicellular, largest: st.largest, viruses: w.viruses ? w.viruses.list.length : 0, o2: +w.o2.toFixed(2), era: w.era().name },
   }));

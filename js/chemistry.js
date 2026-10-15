@@ -325,7 +325,8 @@ export class Soup {
     this.polyHash.build(np, this.pxs, this.pys);
     const mx = this.mx, my = this.my, mt = this.mt, md = this.mdead;
     // Nucleotide reach: generous in the lifeless early ocean, fading back as living cells multiply.
-    const reach = CFG.VES_NT_REACH + (CFG.VES_NT_REACH_EARLY - CFG.VES_NT_REACH) / (1 + w.life.cells.length / CFG.VES_NT_FADE);
+    const early = CFG.VES_NT_REACH_EARLY ?? CFG.VES_NT_REACH;
+    const reach = CFG.VES_NT_REACH + (early - CFG.VES_NT_REACH) / (1 + w.life.cells.length / CFG.VES_NT_FADE);
     const out = [];
     for (const v of this.vesicles) {
       if (v.dead) continue;
