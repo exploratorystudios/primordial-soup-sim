@@ -64,6 +64,7 @@ export const CFG = {
   MAX_ORIGINS_POP: 200,    // stop new abiogenesis once life is this abundant
 
   // ---- Life ---------------------------------------------------------------
+  THREADS: 0,              // threads for the per-tick work (0 = auto: all cores in a browser page, 1 in Node/workers)
   MAX_CELLS: 6000,         // population cap, for CPU (12,000 made late-game ticks ~45 ms in the browser)
   // When crowded (above 85% of the cap) a safety valve culls cells. Selective: the weakest go first (drained energy,
   // near old age, or infected), with the overall cull rate unchanged. false = at random.

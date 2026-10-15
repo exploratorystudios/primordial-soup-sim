@@ -27,6 +27,7 @@ while (queue.length) {
   for (const m of src.matchAll(/(?:import|from)\s*\(?['"](\.\/[^'"]+)['"]/g)) queue.push(path.posix.join(path.posix.dirname(f), m[1]));
 }
 files.add('check-evolution.mjs');
+files.add('js/kernel-worker.js'); // (started by pool.js via new URL, so not found by following imports)
 // Embedded either as each file's source in base64 (default), or gzipped and wrapped into short lines
 // (--compact), for browser notebook editors that fail to show a notebook with one huge cell.
 const compact = process.argv.includes('--compact');

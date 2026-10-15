@@ -13,7 +13,7 @@ microbial for a long time (as Earth did for ~2 billion years).
 npm start            # http://localhost:8080 (or the next free port; PORT=5173 npm start to choose)
 ```
 
-No dependencies or build step: plain ES modules. `?seed=42&speed=0.1` in the URL picks a world and a speed in ticks per frame (0.01 to 250, or `max`). For experiments, `?day=always` gives constant full sunlight, and `?cfg={"DAY_SWING":0}` overrides any setting in `js/config.js` (shown in the panel while active; the tour uses them too).
+No dependencies or build step: plain ES modules. `?seed=42&speed=0.1` in the URL picks a world and a speed in ticks per frame (0.01 to 250, or `max`). For experiments, `?day=always` gives constant full sunlight, and `?cfg={"DAY_SWING":0}` overrides any setting in `js/config.js` (shown in the panel while active; the tour uses them too). The heavy per-tick work runs on all your CPU cores (`js/kernels.js`, `js/pool.js`): this needs the page to be cross-origin isolated, which `server.js` does with two headers (COOP/COEP; serve it with those if you host it elsewhere, or it falls back to one thread). Results don't depend on the number of threads, so replays, rewind and the tour stay exact.
 
 Check that every stage of evolution still emerges (and how often), across many worlds in parallel:
 

@@ -3,6 +3,8 @@
 import { CFG } from './config.js';
 import { SpatialHash } from './spatial.js';
 import * as Gn from './genome.js';
+import * as K from './kernels.js';
+import { views as kernelViews, run as runKernels } from './pool.js';
 
 export const T_GENERIC = 0, T_FEEDER = 1, T_MOTOR = 2, T_MOUTH = 3, T_ARMOR = 4, T_GERM = 5;
 export const TYPE_NAMES = ['Generalist', 'Feeder', 'Motor', 'Mouth', 'Armor', 'Germline'];
@@ -20,7 +22,6 @@ const TM = [
 ];
 
 const snap = (c) => ({ x: c.x, y: c.y, r: c.r, col: c.trophColor, mito: c.mito, id: c.id });
-const GR = { x: 0, y: 0 };
 const CUR = { x: 0, y: 0 };
 
 export class Cell {
@@ -47,6 +48,11 @@ export class Cell {
     this.nut = 0;
     this.infected = null;
     this.x0 = x; this.y0 = y;
+    // Properties set later on (or by the renderer), declared up front in a fixed order: cells then all share
+    // one internal shape, which keeps every loop over them fast.
+    this.dirX = undefined; this.dirY = undefined; this.rTarget = undefined; this.mitoN = undefined;
+    this.born = 0; this.sexual = false; this.founderSeq = null; this.fromProtocell = false; this.endosymbiont = false;
+    this.next = null; this.nextWhy = ''; this._dividing = false; this._fade = undefined;
     decode(this);
   }
 }
@@ -192,7 +198,11 @@ export class Life {
       for (let i = 0; i < n; i++) { const w = this.weakness(cells[i]); sw += w * w; }
       this.meanWeak = sw / n || 1;
     }
-    for (let i = 0; i < n; i++) if (!cells[i].dead) this.live(cells[i]);
+    // The heavy per-cell work runs in parallel phases (kernels.js); light, sensing and steering first.
+    this.prepareKernels(n);
+    this.packCells(this.V);
+    this.runPhase(this.V, 'steer');
+    for (let i = 0; i < n; i++) if (!cells[i].dead) this.live(cells[i], i);
     this.interact();
     if (this.w.t % 2 === 0) this.relax();
     this.physics();
@@ -224,7 +234,7 @@ export class Life {
     c.nutNeed = c.m * CFG.NUT_PER_AREA * 2 * (c.mito ? CFG.EUK_NUT : 1);
   }
 
-  live(c) {
+  live(c, i) {
     const w = this.w, F = w.fields, rng = w.rng, g = c.g, tm = TM[c.type];
     c.age++;
     // After endosymbiosis the new organelle divides inside its host: one, then two, four...
@@ -237,7 +247,7 @@ export class Life {
     // Self-shading: light falls when neighbours cover much of the area around the cell.
     const sq = CFG.LIFE_HASH * CFG.LIFE_HASH;
     const shade = this.coverage[this.hash.cell(c.x, c.y)] - Math.min(Math.PI * c.r * c.r, sq) / sq;
-    let light = w.lightAt(c.x, c.y);
+    let light = this.V.LIGHTOUT[i]; // (computed in the steer phase; the cell hasn't moved since)
     if (shade > 0.35) light /= 1 + (shade - 0.35) * 3;
     const o2 = F.get(F.oxygen, c.x, c.y);
     const o2f = o2 > CFG.O2_REF ? 1 : o2 / CFG.O2_REF;
@@ -274,7 +284,7 @@ export class Life {
     c.energy += gain - cost - toxCost;
     if (c.energy > c.cap) c.energy = c.cap;
 
-    this.steer(c, tm);
+    this.steer(c, tm, i);
 
     // Building a body needs scarce nutrient: this is what really limits the biosphere.
     if (c.nut < c.nutNeed) c.nut += F.take(F.nutrient, c.x, c.y, Math.min(c.nutNeed - c.nut, CFG.NUT_UPTAKE * c.m));
@@ -304,55 +314,81 @@ export class Life {
     }
   }
 
-  steer(c, tm) {
+  // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
+  steer(c, tm, i) {
     const mot = c.motil * tm[4];
     if (mot < 0.03) return;
-    const w = this.w, F = w.fields, g = c.g, rng = w.rng;
-    // Only lineages that react to prey or predators bother to look for them.
-    if ((c.id + w.t) % 6 === 0 && (Math.abs(g[Gn.W_PREY]) > 0.1 || Math.abs(g[Gn.W_FLEE]) > 0.1)) this.sense(c);
-    // Gradients change slowly: rethink the heading every third tick, swim every tick.
-    if ((c.id + w.t) % 3 !== 0 && c.dirX !== undefined) {
-      const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
-      c.vx += c.dirX * th; c.vy += c.dirY * th;
-      c.energy -= mot * CFG.MOT_COST * c.m;
-      return;
-    }
-    let dx = 0, dy = 0;
-    F.grad(F.chem, c.x, c.y, GR); dx += GR.x * g[Gn.W_CHEM]; dy += GR.y * g[Gn.W_CHEM];
-    F.grad(F.organic, c.x, c.y, GR); dx += GR.x * g[Gn.W_ORG]; dy += GR.y * g[Gn.W_ORG];
-    F.grad(F.oxygen, c.x, c.y, GR); dx += GR.x * g[Gn.W_OXY]; dy += GR.y * g[Gn.W_OXY];
-    dy -= g[Gn.W_LIGHT] * 0.8; // phototaxis: light comes from above
-    dx += c.px * g[Gn.W_PREY] + c.fx * g[Gn.W_FLEE];
-    dy += c.py * g[Gn.W_PREY] + c.fy * g[Gn.W_FLEE];
-    c.heading += (rng.next() - 0.5) * 0.5;
-    dx += Math.cos(c.heading) * 0.3;
-    dy += Math.sin(c.heading) * 0.3;
-    const m = Math.hypot(dx, dy) || 1;
+    const V = this.V, f = V.OUTF[i];
+    if (f & K.O_SENSED) { c.px = V.PX[i]; c.py = V.PY[i]; c.fx = V.FX[i]; c.fy = V.FY[i]; }
+    if (f & K.O_RETHINK) { c.heading = V.HEADOUT[i]; c.dirX = V.DIRX[i]; c.dirY = V.DIRY[i]; }
     const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
-    c.dirX = dx / m; c.dirY = dy / m;
-    c.vx += c.dirX * th;
-    c.vy += c.dirY * th;
+    c.vx += c.dirX * th; c.vy += c.dirY * th;
     c.energy -= mot * CFG.MOT_COST * c.m;
   }
 
-  sense(c) {
-    c.px = c.py = c.fx = c.fy = 0;
-    const cells = this.cells, s2 = c.sense * c.sense;
-    const hunts = c.effPred > 0.05;
-    let bp = 1e9, bf = 1e9;
-    // Non-hunters only react to predators: walk the predator grid (same cells, same order, same result).
-    const grid = hunts ? this.hash : this.predHash, idx = hunts ? null : this.pidx;
-    grid.query(c.x, c.y, c.sense, (k) => {
-      const j = idx ? idx[k] : k;
-      const o = cells[j];
-      if (o === c || o.dead || o.org === c.org) return;
-      const dx = o.x - c.x, dy = o.y - c.y, d2 = dx * dx + dy * dy;
-      if (d2 > s2) return;
-      if (hunts && o.r * 1.2 < c.r && d2 < bp) { bp = d2; c.px = dx; c.py = dy; }
-      if (o.effPred > 0.05 && o.r > c.r * 1.2 && d2 < bf) { bf = d2; c.fx = -dx; c.fy = -dy; }
-    });
-    let m = Math.hypot(c.px, c.py); if (m > 0) { c.px /= m; c.py /= m; }
-    m = Math.hypot(c.fx, c.fy); if (m > 0) { c.fx /= m; c.fy /= m; }
+  // ---------------------------------------------------------------- parallel phases (kernels.js, pool.js)
+  // Shared (or local) arrays for this tick, with the grid, predator grid, fields and light settings copied in.
+  prepareKernels(n) {
+    const w = this.w, F = w.fields, h = this.hash, V = kernelViews(n, (w.viruses ? w.viruses.list.length : 0) + 64, h.nc, F.n, w.sunTable.length);
+    this.V = V;
+    const P = V.P;
+    P[K.P_T] = w.t; P[K.P_SEED] = w.seed | 0; P[K.P_MAXR] = this.maxR;
+    P[K.P_HCS] = h.cs; P[K.P_HGW] = h.gw; P[K.P_HGH] = h.gh; P[K.P_FCS] = F.cs; P[K.P_FGW] = F.gw; P[K.P_FGH] = F.gh;
+    P[K.P_LIGHT] = w.dayFactor * w.lightMul; P[K.P_SUNSCALE] = w.sunScale; P[K.P_H] = CFG.H; P[K.P_VENTGLOW] = CFG.VENT_GLOW;
+    const nv = Math.min(w.vents.length, K.MAX_VENTS);
+    P[K.P_NVENTS] = nv;
+    for (let k = 0; k < nv; k++) { const v = w.vents[k]; P[K.P_VENTS + k * 3] = v.x; P[K.P_VENTS + k * 3 + 1] = v.y; P[K.P_VENTS + k * 3 + 2] = v.strength; }
+    P[K.P_N] = n; P[K.P_SEGCAP] = V.segCap; P[K.P_VSEGCAP] = V.vsegCap; P[K.P_HGT] = CFG.HGT_P; P[K.P_SYMB] = CFG.SYMBIO_P > 0 ? 1 : 0;
+    V.HSTART.set(h.start.subarray(0, h.nc + 1)); V.HITEMS.set(h.items.subarray(0, n));
+    const ph = this.predHash, np = ph.start[ph.nc];
+    V.PSTART.set(ph.start.subarray(0, ph.nc + 1)); V.PITEMS.set(ph.items.subarray(0, np)); V.PIDX.set(this.pidx.subarray(0, np));
+    V.FCHEM.set(F.chem); V.FORG.set(F.organic); V.FOXY.set(F.oxygen); V.SUN.set(w.sunTable);
+  }
+
+  // Copy the cells' state into the arrays, once per tick; later phases only refresh what changed.
+  packCells(V) {
+    const cells = this.cells, n = cells.length;
+    for (let i = 0; i < n; i++) {
+      const c = cells[i], g = c.g;
+      V.X[i] = c.x; V.Y[i] = c.y; V.R[i] = c.r; V.AREA[i] = c.area; V.ORG[i] = c.org;
+      let f = c.dead ? K.F_DEAD : 0;
+      if (c.mito) f |= K.F_MITO;
+      if (c.infected) f |= K.F_INFECTED;
+      if (c.dirX === undefined) f |= K.F_NODIR;
+      if (c.effPred > 0.05) f |= K.F_HUNTS;
+      if (c.effPred * TM[c.type][3] >= 0.04) f |= K.F_EATS; // (tryEat's first test)
+      if (!c.mito && c.dna && c.transl > 0.5) f |= K.F_SHOST; // (trySymbiosis's tests)
+      if (!c.mito && c.aer > 0.5) f |= K.F_SPART;
+      V.FLAGS[i] = f;
+      V.ID[i] = c.id; V.EFFPRED[i] = c.effPred; V.SENSE[i] = c.sense; V.MOT[i] = c.motil * TM[c.type][4];
+      V.WCHEM[i] = g[Gn.W_CHEM]; V.WORG[i] = g[Gn.W_ORG]; V.WOXY[i] = g[Gn.W_OXY]; V.WLIGHT[i] = g[Gn.W_LIGHT];
+      V.WPREY[i] = g[Gn.W_PREY]; V.WFLEE[i] = g[Gn.W_FLEE];
+      V.HEAD[i] = c.heading; V.PX[i] = c.px; V.PY[i] = c.py; V.FX[i] = c.fx; V.FY[i] = c.fy;
+    }
+  }
+
+  // After the cells have lived: positions (a dividing cell shifts), sizes (growing eukaryotes) and deaths.
+  refreshCells(V) {
+    const cells = this.cells, n = cells.length;
+    for (let i = 0; i < n; i++) {
+      const c = cells[i];
+      V.X[i] = c.x; V.Y[i] = c.y; V.R[i] = c.r; V.AREA[i] = c.area;
+      if (c.dead) V.FLAGS[i] |= K.F_DEAD;
+    }
+  }
+
+  // Run a phase; if a chunk's list of contacts or candidates overflowed its slot, redo the phase on the main
+  // thread with room to spare (rare). Returns the arrays holding the results.
+  runPhase(V, phase) {
+    runKernels(V, phase);
+    const counts = phase === 'contact' ? V.EVN : phase === 'virus' ? V.VCN : null;
+    if (!counts || !counts.some((c) => c < 0)) return V;
+    const P = Float64Array.from(V.P);
+    const total = phase === 'virus' ? P[K.P_NV] : P[K.P_N];
+    P[K.P_CHUNKS] = 1; P[K.P_SEGCAP] = total * 400 + 1024; P[K.P_VSEGCAP] = total * 400 + 1024;
+    const T = { ...V, P, EV: new Int32Array(P[K.P_SEGCAP]), EVN: new Int32Array(1), VC: new Int32Array(P[K.P_VSEGCAP]), VCN: new Int32Array(1), VSTART: new Int32Array(V.vcap), VCOUNT: new Int32Array(V.vcap) };
+    K.runChunk(T, phase, 0);
+    return T;
   }
 
   divide(c) {
@@ -429,34 +465,24 @@ export class Life {
     for (const o of c.bonds.slice()) unlink(c, o);
   }
 
-  // Collisions, predation and horizontal gene transfer.
+  // Collisions, predation and horizontal gene transfer. Every cell's push comes from the same positions
+  // (computed in parallel, then applied together); touching pairs from different organisms then get their
+  // chance to eat, exchange genes or merge, one pair at a time in a fixed order.
   interact() {
-    const cells = this.cells, n = cells.length, rng = this.w.rng, maxR = this.maxR;
-    const h = this.hash, st = h.start, items = h.items, gw = h.gw;
-    for (let i = 0; i < n; i++) {
-      const a = cells[i];
-      if (a.dead) continue;
-      // (The spatial-hash walk is inlined: this is one of the hottest loops in the simulation.)
-      h.box(a.x, a.y, a.r + maxR);
-      for (let cy = h.y0; cy <= h.y1; cy++) {
-        for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
-          for (let k = st[g], e = st[g + 1]; k < e; k++) {
-            const j = items[k];
-            if (j <= i || a.dead) continue;
-            const b = cells[j];
-            if (b.dead) continue;
-            const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = a.r + b.r;
-            if (d2 >= rr * rr) continue;
-            const d = Math.sqrt(d2) || 0.01;
-            const nx = dx / d, ny = dy / d, ov = (rr - d) * 0.8, s = a.area + b.area; // membranes barely interpenetrate
-            a.x -= nx * ov * (b.area / s); a.y -= ny * ov * (b.area / s);
-            b.x += nx * ov * (a.area / s); b.y += ny * ov * (a.area / s);
-            if (a.org === b.org) continue;
-            const ate = this.tryEat(a, b) || this.tryEat(b, a);
-            if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
-            if (!a.dead && !b.dead && rng.next() < CFG.HGT_P) this.transferGene(a, b);
-          }
-        }
+    const cells = this.cells, n = cells.length, V = this.V;
+    this.refreshCells(V);
+    const R = this.runPhase(V, 'contact');
+    for (let i = 0; i < n; i++) { const c = cells[i]; if (!c.dead) { c.x += R.PUSHX[i]; c.y += R.PUSHY[i]; V.X[i] = c.x; V.Y[i] = c.y; } }
+    const chunks = R.P[K.P_CHUNKS], seg = R.P[K.P_SEGCAP];
+    for (let k = 0; k < chunks; k++) {
+      for (let q = k * seg, qe = q + R.EVN[k]; q < qe; q += 3) {
+        const i = R.EV[q], j = R.EV[q + 1], a = cells[i], b = cells[j];
+        if (a.dead || b.dead) continue;
+        const ate = this.tryEat(a, b) || this.tryEat(b, a);
+        if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
+        if (R.EV[q + 2] && !a.dead && !b.dead) this.transferGene(a, b);
+        if (a.dead) V.FLAGS[i] |= K.F_DEAD;
+        if (b.dead) V.FLAGS[j] |= K.F_DEAD;
       }
     }
   }
@@ -464,28 +490,9 @@ export class Life {
   // A colony behaves like one big body for engulfment purposes.
   // Extra position-only pass so densely packed cells don't interpenetrate (visible at true scale).
   relax() {
-    const cells = this.cells, n = cells.length, maxR = this.maxR;
-    const h = this.hash, st = h.start, items = h.items, gw = h.gw;
-    for (let i = 0; i < n; i++) {
-      const a = cells[i];
-      if (a.dead) continue;
-      h.box(a.x, a.y, a.r + maxR);
-      for (let cy = h.y0; cy <= h.y1; cy++) {
-        for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
-          for (let k = st[g], e = st[g + 1]; k < e; k++) {
-            const j = items[k];
-            if (j <= i) continue;
-            const b = cells[j];
-            if (b.dead) continue;
-            const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = (a.r + b.r) * 0.97;
-            if (d2 >= rr * rr) continue;
-            const d = Math.sqrt(d2) || 0.01, ov = (rr - d) * 0.7, s = a.area + b.area;
-            a.x -= (dx / d) * ov * (b.area / s); a.y -= (dy / d) * ov * (b.area / s);
-            b.x += (dx / d) * ov * (a.area / s); b.y += (dy / d) * ov * (a.area / s);
-          }
-        }
-      }
-    }
+    const cells = this.cells, n = cells.length, V = this.V;
+    this.runPhase(V, 'relax'); // (positions and deaths are current in V: interact kept them up to date)
+    for (let i = 0; i < n; i++) { const c = cells[i]; if (!c.dead) { c.x += V.PUSHX[i]; c.y += V.PUSHY[i]; V.X[i] = c.x; V.Y[i] = c.y; } }
   }
 
   bodyRadius(c) { return c.orgSize > 1 ? c.r * Math.sqrt(c.orgSize) * 0.8 : c.r; }
@@ -604,7 +611,9 @@ export class Life {
     }
     for (let i = 0; i < broken.length; i += 2) unlink(broken[i], broken[i + 1]);
 
-    for (const c of cells) {
+    const V = this.V;
+    for (let i = 0, n = cells.length; i < n; i++) {
+      const c = cells[i];
       if (c.dead) continue;
       this.w.current(c.x, c.y, CUR);
       // Microbes are carried by the water: currents and vent plumes move them passively.
@@ -614,6 +623,7 @@ export class Life {
       c.vx *= damp; c.vy *= damp;
       if (c.x < c.r) { c.x = c.r; c.vx = Math.abs(c.vx) * 0.5; } else if (c.x > W - c.r) { c.x = W - c.r; c.vx = -Math.abs(c.vx) * 0.5; }
       if (c.y < c.r) { c.y = c.r; c.vy = Math.abs(c.vy) * 0.5; } else if (c.y > H - c.r) { c.y = H - c.r; c.vy = -Math.abs(c.vy) * 0.5; }
+      if (V) { V.X[i] = c.x; V.Y[i] = c.y; } // (the virus search reads these)
     }
   }
 

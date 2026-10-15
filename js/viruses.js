@@ -5,6 +5,7 @@
 // a gene from its last host into a new one (transduction).
 import { CFG } from './config.js';
 import * as Gn from './genome.js';
+import * as K from './kernels.js';
 
 const CUR = { x: 0, y: 0 };
 
@@ -39,8 +40,9 @@ export class Viruses {
       }
     }
     const out = [], cells = L.cells, spec2 = 2 * CFG.VIRUS_SPEC * CFG.VIRUS_SPEC;
-    const W = CFG.W, H = CFG.H;
-    for (const v of this.list) {
+    const W = CFG.W, H = CFG.H, list = this.list, nv = list.length;
+    // 1) Drift (and decay in UV), in order: this uses the shared random generator.
+    for (const v of list) {
       v.age++;
       // Ultraviolet light near the surface destroys exposed particles.
       if (rng.next() < CFG.VIRUS_DECAY * (1 + w.sunAt(v.y) * 3)) { v.dead = true; v.nextWhy = 'fell apart (UV light and decay)'; continue; }
@@ -50,45 +52,50 @@ export class Viruses {
       if (v.x < 0) v.x = -v.x; else if (v.x > W) v.x = 2 * W - v.x;
       if (v.y < 0) v.y = -v.y; else if (v.y > H) v.y = 2 * H - v.y;
       v.ang += (rng.next() - 0.5) * 0.3;
-      let used = false;
-      if (cells.length && (v.id + w.t) % 2 === 0) {
-        // (The spatial-hash walk is inlined: thousands of particles search every tick.)
-        const h = L.hash, st = h.start, items = h.items, gw = h.gw;
-        h.box(v.x, v.y, L.maxR + 1);
-        scan: for (let cy = h.y0; cy <= h.y1; cy++) {
-          for (let g = cy * gw + h.x0, ge = cy * gw + h.x1; g <= ge; g++) {
-            for (let k = st[g], e = st[g + 1]; k < e; k++) {
-              const c = cells[items[k]];
-              if (!c || c.dead || c.infected) continue;
-              if (CFG.VIRUS_DOMAIN && !v.euk !== !c.mito) continue; // wrong kind of host: can't even attach
-              const dx = c.x - v.x, dy = c.y - v.y;
-              if (dx * dx + dy * dy > (c.r + 0.1) * (c.r + 0.1)) continue;
-              // Binding: the virus's key must fit the cell's receptor shape.
-              const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
-              const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);
-              if (rng.next() > CFG.VIRUS_INFECT * fit * (1 - 0.9 * c.resist)) continue;
-              used = true;
-              v.next = c;
-              if (v.cargo && rng.next() < CFG.TRANSDUCE) {
-                v.nextWhy = `slipped a gene into cell #${c.id}`;
-                // Transduction: the virus delivers a gene from its last host instead of taking over.
-                c.g = new Float32Array(c.g);
-                c.g[v.cargo.i] = v.cargo.v;
-                this.stats.transductions++;
-                w.life.redecode(c);
-              } else {
-                v.nextWhy = `injected its genome into cell #${c.id}`;
-                w.emit('inject', 40, { cell: c, v, x: v.x, y: v.y });
-                c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
-                this.stats.infections++;
-              }
-              break scan;
-            }
-          }
-        }
-      }
-      if (!used) out.push(v); else v.dead = true;
     }
+    // 2) Which cells each virus touches (half of them search each tick): in parallel (kernels.js).
+    const V = L.V;
+    if (cells.length && V && nv <= V.vcap) {
+      for (let k = 0; k < nv; k++) {
+        const v = list[k];
+        V.VX[k] = v.x; V.VY[k] = v.y;
+        V.VFLAGS[k] = (!v.dead && (v.id + w.t) % 2 === 0 ? 1 : 0) | (v.euk ? 2 : 0);
+      }
+      V.P[K.P_NV] = nv; V.P[K.P_DOMAIN] = CFG.VIRUS_DOMAIN ? 1 : 0;
+      const R = L.runPhase(V, 'virus');
+      // 3) Infections, one virus at a time in order (cells already infected this tick are skipped).
+      for (let k = 0; k < nv; k++) {
+        const v = list[k];
+        if (v.dead) continue;
+        let used = false;
+        for (let q = R.VSTART[k], qe = q + R.VCOUNT[k]; q < qe; q++) {
+          const c = cells[R.VC[q]];
+          if (!c || c.dead || c.infected) continue;
+          // Binding: the virus's key must fit the cell's receptor shape.
+          const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
+          const fit = Math.exp(-(d1 * d1 + d2 * d2) / spec2);
+          if (rng.next() > CFG.VIRUS_INFECT * fit * (1 - 0.9 * c.resist)) continue;
+          used = true;
+          v.next = c;
+          if (v.cargo && rng.next() < CFG.TRANSDUCE) {
+            v.nextWhy = `slipped a gene into cell #${c.id}`;
+            // Transduction: the virus delivers a gene from its last host instead of taking over.
+            c.g = new Float32Array(c.g);
+            c.g[v.cargo.i] = v.cargo.v;
+            this.stats.transductions++;
+            w.life.redecode(c);
+          } else {
+            v.nextWhy = `injected its genome into cell #${c.id}`;
+            w.emit('inject', 40, { cell: c, v, x: v.x, y: v.y });
+            c.infected = { t: w.t + CFG.VIRUS_LATENCY + rng.int(CFG.VIRUS_LATENCY), k1: v.k1, k2: v.k2, lineage: v.lineage, since: w.t };
+            this.stats.infections++;
+          }
+          break;
+        }
+        if (used) v.dead = true;
+      }
+    }
+    for (const v of list) if (!v.dead) out.push(v);
     for (const v of this.pending) out.push(v);
     this.pending = [];
     this.list = out;
