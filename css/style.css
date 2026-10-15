@@ -167,6 +167,7 @@ button.wide { width: 100%; margin-top: 8px; }
 #st-tick { color: var(--muted); font-size: 12px; min-width: 170px; text-align: right; }
 #st-tick .now { color: var(--accent-2); }
 #st-status { color: var(--muted); font-size: 11px; }
+body.busy, body.busy * { cursor: progress !important; }
 .st-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; gap: 8px; }
 .st-foot .check { font-size: 11px; color: var(--muted); margin: 0; }
 button.active { border-color: var(--accent-2); color: var(--accent-2); }

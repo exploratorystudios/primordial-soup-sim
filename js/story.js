@@ -20,8 +20,8 @@ export class Story {
     $('st-prev').onclick = () => this.go(this.idx - 1);
     $('st-next').onclick = () => this.go(this.idx + 1);
     $('st-replay').onclick = () => this.cur && this.seek(this.cur.start, false);
-    $('st-back').onclick = () => this.cur && this.seek(this.app.world.t - this.step(), true);
-    $('st-fwd').onclick = () => this.cur && this.seek(this.app.world.t + this.step(), true);
+    $('st-back').onclick = () => this.cur && this.seek(this.now() - this.step(), true);
+    $('st-fwd').onclick = () => this.cur && this.seek(this.now() + this.step(), true);
     $('st-play').onclick = () => {
       if (!this.cur) return;
       if (this.app.world.t >= this.cur.end) { this.seek(this.cur.start, false); this.app.setRunning(true); return; }
@@ -125,10 +125,27 @@ export class Story {
   // How far the back/forward buttons jump: a tenth of the scene, at least 10 ticks.
   step() { return Math.max(10, Math.round((this.cur.end - this.cur.start) / 10)); }
 
-  // Restore the world at tick t (from the nearest earlier snapshot, then replay forward).
+  // The tick being shown, or about to be (repeated ◀◀ presses add up).
+  now() { return this.pending ? this.pending.t : this.app.world.t; }
+
+  // Restore the world at tick t (from the nearest earlier snapshot, then replay forward). Deferred a
+  // moment so the busy cursor shows: late in a run a restore takes a second or two.
   seek(t, keepView) {
     const c = this.cur;
     t = Math.max(c.start, Math.min(c.end, Math.round(t)));
+    this.pending = { t, keepView, c };
+    document.body.classList.add('busy');
+    clearTimeout(this.seekTimer);
+    this.seekTimer = setTimeout(() => {
+      const p = this.pending;
+      this.pending = null;
+      if (p && p.c === this.cur) this.restore(p.t, p.keepView);
+      document.body.classList.remove('busy');
+    }, 30);
+  }
+
+  restore(t, keepView) {
+    const c = this.cur;
     let s = c.snaps[0];
     for (const q of c.snaps) if (q.t <= t) s = q;
     const w = deserialize(structuredClone(s.data));
@@ -206,7 +223,7 @@ export class Story {
   }
 
   update() {
-    if (!this.active || !this.cur) return;
+    if (!this.active || !this.cur || this.pending) return; // (a restore is about to replace the world)
     const w = this.app.world, c = this.cur;
     if (this.waiting && c.ref.kind !== 'none' && w.t <= c.end) this.resolveSubject(null);
     if (ORGANISM_SCENES.has(c.key) && w.t % 10 === 0) {

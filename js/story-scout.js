@@ -49,12 +49,18 @@ async function run(seed, maxTicks) {
     const ok = (s) => o.appears || existed(ref, s); // appears: the subject may be born during the scene (watch its spot until then)
     let start = all.find((s) => s.t <= T - o.lead && ok(s));
     if (!start) start = all.find((s) => s.t <= T - (o.leadMin ?? 0) && ok(s));
+    // A cell born too recently to be in any snapshot (late in a run cells divide faster than snapshots
+    // are taken): start by watching the spot, and the player picks the cell up once it exists.
+    if (!start && ref.kind === 'cell' && ref.x !== undefined) {
+      start = all.find((s) => s.t <= T - o.lead) || all.find((s) => s.t <= T - (o.leadMin ?? 0));
+      if (start) o = { ...o, at: o.at || { x: ref.x, y: ref.y } };
+    }
     if (!start) return; // the subject is too new to watch from before: wait for another example
     found.add(key);
     pending.push({ key, T, start: start.t, end: T + o.tail, ref, ref2: o.ref2 || null, at: o.at || null, fov: o.fovNm, snaps: all.filter((s) => s.t >= start.t).sort((a, b) => a.t - b.t) });
   }
   const fov = (r, k) => Math.max(60, r * 2 * NMU * k);
-  const cellRef = (c) => ({ kind: 'cell', id: c.id, parent: c.parentId || null }); // a newborn is watched via its parent until it exists
+  const cellRef = (c) => ({ kind: 'cell', id: c.id, parent: c.parentId || null, x: c.x, y: c.y }); // a newborn is watched via its parent until it exists
   const pickCell = (score) => { let best = null, bs = -Infinity; for (const c of w.life.cells) { const s = score(c); if (s > bs) { bs = s; best = c; } } return best; };
   const orgFounder = (want) => {
     const o = w.life.organisms.find(want);
@@ -132,8 +138,10 @@ async function run(seed, maxTicks) {
         const want = key === 'colony' ? (o) => o.size >= 4 : key === 'multicellular' ? (o) => o.kind !== 'colony' : (o) => o.kind === 'complex';
         const r = orgFounder(want);
         if (!r) break;
-        const lead = Math.min(key === 'colony' ? 2500 : 4000, w.t - r.f.born + 20);
-        const extent = Math.sqrt(r.o.size) * r.f.r * 2 * NMU * 3.2;
+        // Colony and multicellular scenes start from the founder cell; the complex organism is shown
+        // grown up (it often qualifies at the same census as 'multicellular').
+        const lead = Math.min(key === 'colony' ? 2500 : key === 'complex' ? 300 : 4000, w.t - r.f.born + 20);
+        const extent = Math.sqrt(r.o.size) * r.f.r * 2 * NMU * (key === 'complex' ? 4.5 : 3.2);
         propose(key, cellRef(r.f), { lead, leadMin: Math.min(lead, 100), tail: key === 'colony' ? 150 : 600, fovNm: Math.max(fov(r.f.r, 6), extent) });
         break;
       }
