@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,9 +25,12 @@ while (queue.length) {
   for (const m of src.matchAll(/(?:import|from)\s*\(?['"](\.\/[^'"]+)['"]/g)) queue.push(path.posix.join(path.posix.dirname(f), m[1]));
 }
 files.add('check-evolution.mjs');
-const blobs = {};
-for (const f of [...files].sort()) blobs[f] = fs.readFileSync(path.join(root, f)).toString('base64');
-blobs['package.json'] = Buffer.from(JSON.stringify({ type: 'module' })).toString('base64');
+// Packed as gzipped JSON in base64, wrapped into short lines: browser notebook editors (Modal, Colab, ...)
+// can fail to show a notebook with one huge cell or very long lines.
+const sources = {};
+for (const f of [...files].sort()) sources[f] = fs.readFileSync(path.join(root, f), 'utf8');
+sources['package.json'] = JSON.stringify({ type: 'module' });
+const packed = zlib.gzipSync(JSON.stringify(sources), { level: 9 }).toString('base64').match(/.{1,100}/g).join('\n');
 
 let commit = 'unknown';
 try { commit = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch { /* not a repo */ }
@@ -157,13 +161,16 @@ print("Node", ver, "at", NODE)
 assert major >= 18, "Node.js 18+ is needed (allow internet access so it can be downloaded, or install it)"
 `),
   code(`
-# ---- The simulation (embedded) --------------------------------------------------------------------
-FILES = ${JSON.stringify(blobs, null, 1)}
-for rel, b64 in FILES.items():
+# ---- The simulation (embedded: its ${files.size} source files, gzipped) ------------------------------------
+import gzip
+PACKED = """
+${packed}
+"""
+for rel, text in json.loads(gzip.decompress(base64.b64decode("".join(PACKED.split())))).items():
     p = os.path.join(SIM, rel)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "wb") as f:
-        f.write(base64.b64decode(b64))
+    with open(p, "w") as f:
+        f.write(text)
 # Smoke test: a short world must reach the first living cell.
 r = subprocess.run([NODE, "check-evolution.mjs", "--worker", "1", "--seed", "1", "--ticks", "2500"],
                    cwd=SIM, capture_output=True, text=True, timeout=600)
@@ -324,4 +331,10 @@ const nb = {
   nbformat: 4, nbformat_minor: 5,
 };
 fs.writeFileSync(out, JSON.stringify(nb, null, 1));
+
+// The same thing as a plain script, for services where notebooks won't open: python primordial-soup-ab.py
+const script = ['# Primordial Soup A/B evolution runs (script version of primordial-soup-ab.ipynb).',
+  '# Edit the settings block below, then: python primordial-soup-ab.py   (re-run to resume)', '',
+  ...cells.filter((c) => c.cell_type === 'code').map((c) => c.source.join('').replace('plt.tight_layout(); plt.show()', 'plt.tight_layout(); plt.savefig(os.path.join(WORK, f"stages-{RUN_TAG}.png")); print("Chart saved to", os.path.join(WORK, f"stages-{RUN_TAG}.png"))'))].join('\n\n');
+fs.writeFileSync(out.replace(/\.ipynb$/, '.py'), script);
 console.log(`Wrote ${path.relative(root, out)} (${(fs.statSync(out).size / 1024).toFixed(0)} KB, ${files.size} simulation files, commit ${commit}${dirty})`);
