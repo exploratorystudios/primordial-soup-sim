@@ -190,9 +190,10 @@ canvas.addEventListener('wheel', (e) => {
   flight = null;
   const r = canvas.getBoundingClientRect();
   const f = Math.exp(-e.deltaY * 0.0015);
-  // While following something, zoom straight into it.
-  if (ui.selected && ui.selected.follow && !ui.selected.gone) renderer.zoomAt(r.width / 2, r.height / 2, f);
-  else renderer.zoomAt(e.clientX - r.left, e.clientY - r.top, f);
+  // While following something centred, zoom straight into it; once you've panned, zoom at the cursor.
+  const s = ui.selected, following = s && s.follow && !s.gone;
+  if (following && !(s.pan && s.pan.hold)) renderer.zoomAt(r.width / 2, r.height / 2, f);
+  else { renderer.zoomAt(e.clientX - r.left, e.clientY - r.top, f); if (following) reframe(); }
 }, { passive: false });
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -284,19 +285,17 @@ function startFollow(sel) {
   let c = t;
   try { c = centreOf(sel); } catch { /* parts without a centre are followed by their body */ }
   sel.offset = { x: c.x - t.x, y: c.y - t.y };
-  const v = viewW();
-  sel.pan = { x: (renderer.cam.x - c.x) / v, y: (renderer.cam.y - c.y) / v, hold: false }; // glides into the centre
+  sel.pan = { x: renderer.cam.x - c.x, y: renderer.cam.y - c.y, hold: false }; // glides into the centre
 }
 
 function chase(sel, dt) {
   const t = followTarget(sel), o = sel.offset || { x: 0, y: 0 }, p = sel.pan || (sel.pan = { x: 0, y: 0 });
   if (!p.hold) { const k = Math.exp(-dt / 0.35); p.x *= k; p.y *= k; } // ease into the centre
-  const v = viewW(); // the pan is a fraction of the view, so zooming keeps the subject where it is on screen
-  clampPan(p, sel);
-  renderer.cam.x = t.x + o.x + p.x * v;
-  renderer.cam.y = t.y + o.y + p.y * v;
+  // After a pan the view rides along with the subject at that offset (you can look anywhere, even
+  // well away from it, and everything stays still relative to it).
+  renderer.cam.x = t.x + o.x + p.x;
+  renderer.cam.y = t.y + o.y + p.y;
 }
-function viewW() { return renderer.fieldWidthNm() / NM_PER_UNIT; }
 
 function kindOf(o) {
   if (o instanceof Cell) return 'cell';
@@ -393,20 +392,9 @@ function reframe() {
   if (!s || s.gone || !s.follow) return;
   const t = followTarget(s);
   const o = s.offset || { x: 0, y: 0 };
-  const v = viewW();
-  s.pan = clampPan({ x: (renderer.cam.x - t.x - o.x) / v, y: (renderer.cam.y - t.y - o.y) / v, hold: true }, s); // stays where you put it
-  renderer.cam.x = t.x + o.x + s.pan.x * v; renderer.cam.y = t.y + o.y + s.pan.y * v;
+  s.pan = { x: renderer.cam.x - t.x - o.x, y: renderer.cam.y - t.y - o.y, hold: true }; // stays where you put it
 }
 
-// The followed thing can be dragged anywhere on screen, but not off it (you'd be following
-// something you can't see).
-function clampPan(p, s) {
-  const cv = renderer.canvas, v = viewW(), aspect = cv.height / cv.width;
-  const r = ((s.obj && s.obj.r) || 0) / v; // keep all of it in view (most of it, if it's nearly screen-sized)
-  const mx = Math.max(0.1, 0.5 - 0.02 - r), my = Math.max(0.1 * aspect, 0.5 * aspect - 0.02 - r);
-  p.x = Math.max(-mx, Math.min(mx, p.x)); p.y = Math.max(-my, Math.min(my, p.y));
-  return p;
-}
 
 // Up one level (inspector button or Esc); keeps following and keeps the view steady.
 function goUp() {
