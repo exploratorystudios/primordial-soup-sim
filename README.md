@@ -13,7 +13,7 @@ microbial for a long time (as Earth did for ~2 billion years).
 npm start            # http://localhost:8080 (or the next free port; PORT=5173 npm start to choose)
 ```
 
-No dependencies or build step: plain ES modules. `?seed=42&speed=6` in the URL picks a world and speed.
+No dependencies or build step: plain ES modules. `?seed=42&speed=0.1` in the URL picks a world and a speed in ticks per frame (0.01 to 250, or `max`).
 
 Check that every stage of evolution still emerges (and how often), across many worlds in parallel:
 
@@ -52,7 +52,7 @@ narration in `video/make-script.mjs` together, then regenerate the script so the
 - **Scroll** zoom (habitat → single molecules) · **drag** pan
 - **Click** selects the outermost thing under the cursor (an organism, protocell, strand, molecule or virus). **Click again inside the selection** to select the part under the cursor, one level deeper; click inside a parent to pick a sibling; click outside to start over. **Esc** goes up a level. Clicking never moves the camera.
 - **F** (or the inspector's Follow button) locks the camera onto the selection, so it stays still in the middle of the screen however it moves. Following stays on until you press F or the button again: pan anywhere you like, even right away from it, and the view keeps moving with it as if you were riding along (zooming then works at the cursor as usual); whatever you select next is followed too. Press F twice to re-centre it
-- **Space** pause · **+ / -** speed. At speeds below one tick per frame, motion is smoothly interpolated between ticks; paused means truly frozen.
+- **Space** pause · **+ / -** speed, from one tick every 100 frames up to 250 ticks per frame and **max**. At speeds below one tick per frame, motion is smoothly interpolated between ticks; paused means truly frozen. When a setting asks for more than the CPU can deliver, the label shows the rate actually achieved (max gives the simulation most of each frame, so the view gets choppier).
 - **⏭ Next milestone** runs at full speed until something new happens · **Tour** lets you watch every transition this world went through (see below)
 - **Save world / Load world** write and resume a compressed `.json.gz` snapshot; a resumed world continues exactly as the original would have
 - Colour cells by metabolism, by species (neutral pigment gene, so related lineages share a hue), or by cell type

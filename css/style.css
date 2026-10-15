@@ -67,7 +67,7 @@ label.row { justify-content: space-between; }
 label.check { display: flex; gap: 6px; align-items: center; }
 input[type=range] { flex: 1; }
 input[type=number] { width: 70px; }
-#speed-val { width: 64px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+#speed-val { min-width: 64px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 button, select, input[type=number] {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);

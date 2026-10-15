@@ -8,7 +8,9 @@ import { Cell } from './life.js';
 import { Story } from './story.js';
 import { saveToFile, loadFromFile } from './persist.js';
 
-const SPEEDS = [0.25, 1, 2, 5, 10, 20, 50, 100, 250]; // ticks per frame
+// Ticks per frame. Below 1 the view interpolates between ticks. Max runs the simulation as fast as
+// the CPU allows, giving it most of each frame (a choppier view in exchange for more ticks).
+const SPEEDS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 250, Infinity];
 const $ = (id) => document.getElementById(id);
 
 const canvas = $('world');
@@ -21,18 +23,31 @@ let seed = +params.get('seed') || Math.floor(Math.random() * 1e6) + 1;
 $('seed').value = seed;
 let world = new World(seed);
 let running = true;
-let speedIdx = 3;
+let speedIdx = SPEEDS.indexOf(5);
 let frame = 0;
 let acc = 0;
 let alpha = 1; // how far between the previous and current tick to draw (smoothing at slow speeds)
 
+// The slider setting nearest to v ticks per frame.
+const speedIndexOf = (v) => v === Infinity ? SPEEDS.length - 1 : SPEEDS.reduce((b, s, i) => (Math.abs(Math.log(s / v)) < Math.abs(Math.log(SPEEDS[b] / v)) ? i : b), 0);
+// Milliseconds of simulation allowed per frame: 30 keeps the view smooth.
+const simBudget = (s) => (s <= 20 ? 30 : s <= 250 ? 45 : 90);
+let tpsTicks = 0, tpsSince = performance.now(), tps = 0;
+
 function setSpeed(i) {
-  speedIdx = i;
-  $('speed').value = i;
-  const s = SPEEDS[i];
-  $('speed-val').textContent = s < 1 ? `${s}×/frame` : `${s}/frame`;
+  speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i));
+  $('speed').value = speedIdx;
+  speedLabel();
 }
-setSpeed(+params.get('speed') || speedIdx);
+function speedLabel() {
+  const s = SPEEDS[speedIdx];
+  const set = s === Infinity ? 'max' : s < 1 ? `1 tick / ${Math.round(1 / s)} frames` : `${s} / frame`;
+  // When the setting is more than the CPU can do, say what it actually achieves.
+  const capped = s >= 1 && running && tps && tps < s * 50;
+  $('speed-val').textContent = capped ? `${set} · ≈${Math.round(tps).toLocaleString()} ticks/s` : set;
+}
+// ?speed= in ticks per frame (0.01 … 250, or max).
+setSpeed(params.has('speed') ? speedIndexOf(params.get('speed') === 'max' ? Infinity : +params.get('speed') || SPEEDS[0]) : speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
 
 function newWorld(s) {
@@ -55,7 +70,7 @@ const story = new Story({
   renderer,
   setWorld(w) { world = w; ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null; flight = null; acc = 0; alpha = 1; },
   setRunning(b) { running = b; $('btn-play').textContent = running ? 'Pause' : 'Play'; },
-  setSpeed,
+  setSpeed: (v) => setSpeed(speedIndexOf(v)),
   setOverlay(o) { opts.overlay = o; $('overlay').value = o; },
   follow: storyFollow,
 });
@@ -80,13 +95,14 @@ function frameStep() {
     if (seeking) $('btn-seek').textContent = `⏭ Seeking… tick ${world.t.toLocaleString()}`;
   } else if (running) {
     acc += SPEEDS[speedIdx];
-    const t0 = performance.now();
-    // Stay responsive: never spend more than ~30 ms simulating per frame.
-    while (acc >= 1 && performance.now() - t0 < 30) { world.step(); acc--; }
-    if (acc > 1) acc = 0;
+    const t0 = performance.now(), budget = simBudget(SPEEDS[speedIdx]);
+    // Stay responsive: never spend more than the budget simulating per frame.
+    while (acc >= 1 && performance.now() - t0 < budget) { world.step(); acc--; tpsTicks++; }
+    if (acc > 1) acc = 0; // (also what keeps Max from piling up)
     alpha = SPEEDS[speedIdx] >= 1 ? 1 : acc;
     world.smooth = SPEEDS[speedIdx] < 1; // only pay for in-between frames when they're visible
   }
+  if (now - tpsSince > 500) { tps = (tpsTicks * 1000) / (now - tpsSince); tpsTicks = 0; tpsSince = now; speedLabel(); }
   // Draw everything partway between ticks (the simulation itself never sees these positions).
   story.update(dt);
   $('btn-tour').classList.toggle('active', story.active);
@@ -192,8 +208,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'f' || e.key === 'F') toggleFollow();
   else if (story.active && e.key === 'ArrowLeft') { e.preventDefault(); $('st-back').click(); }
   else if (story.active && e.key === 'ArrowRight') { e.preventDefault(); $('st-fwd').click(); }
-  else if (e.key === '+' || e.key === '=') setSpeed(Math.min(SPEEDS.length - 1, speedIdx + 1));
-  else if (e.key === '-') setSpeed(Math.max(0, speedIdx - 1));
+  else if (e.key === '+' || e.key === '=') setSpeed(speedIdx + 1);
+  else if (e.key === '-') setSpeed(speedIdx - 1);
 });
 
 window.addEventListener('resize', () => renderer.resize());
