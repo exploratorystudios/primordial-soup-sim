@@ -66,20 +66,17 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    "baseline":   {},
-    # Protocells draw in nucleotides from further away while the ocean is lifeless (early reach 3-4 instead of
-    # 1.5), fading as life spreads (halved at 50 living cells, ~1% left at 4,000). A previous run with 3 required
-    # self-copies kept late stages intact but life failed to start in 29% of worlds, so:
-    "grad_r4_c2": {"VES_NT_REACH_EARLY": 4, "VES_NT_FADE": 50, "CELL_COPIES": 2},   # 2 copies needed
-    "grad_r3_c2": {"VES_NT_REACH_EARLY": 3, "VES_NT_FADE": 50, "CELL_COPIES": 2},   # gentler boost
-    "grad_r4_c1": {"VES_NT_REACH_EARLY": 4, "VES_NT_FADE": 50},                     # copies unchanged (1): do extra
-                                                                                     # origins of life matter?
+    # The current simulation: protocells draw in nucleotides from further away while the ocean is lifeless
+    # (early reach 4 instead of 1.5), fading as life spreads (halved at 50 living cells). Adopted after a
+    # 4-way run (results-pool3.jsonl): life started in 28/28 worlds and no later stage changed significantly.
+    "new_default": {},
+    "old_default": {"VES_NT_REACH_EARLY": None},   # before that change: reach 1.5 throughout
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "pool3"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "pool4"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
