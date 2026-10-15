@@ -18,8 +18,10 @@ export class Viruses {
     this.stats = { infections: 0, bursts: 0, transductions: 0 };
   }
 
-  make(x, y, k1, k2, lineage, cargo) {
-    return { id: this.nextId++, x, y, x0: x, y0: y, k1, k2, lineage, cargo, age: 0, ang: Math.random() * 6.283 };
+  make(x, y, k1, k2, lineage, cargo, euk = false) {
+    const v = { id: this.nextId++, x, y, x0: x, y0: y, k1, k2, lineage, cargo, age: 0, ang: Math.random() * 6.283 };
+    if (CFG.VIRUS_DOMAIN) v.euk = !!euk; // infects eukaryotes (true) or bacteria (false)
+    return v;
   }
 
   step() {
@@ -30,7 +32,7 @@ export class Viruses {
       if (host && !host.dead) {
         this.lineages++;
         const born = [];
-        for (let k = 0; k < 6; k++) { const v = this.make(host.x + rng.range(-host.r, host.r), host.y + rng.range(-host.r, host.r), host.g[Gn.REC1], host.g[Gn.REC2], this.lineages, null); this.list.push(v); born.push(v); }
+        for (let k = 0; k < 6; k++) { const v = this.make(host.x + rng.range(-host.r, host.r), host.y + rng.range(-host.r, host.r), host.g[Gn.REC1], host.g[Gn.REC2], this.lineages, null, host.mito); this.list.push(v); born.push(v); }
         w.emit('vescape', 45, { host, vs: born });
         w.milestone('virus', 'The first virus: a selfish genetic element escapes its host', host);
         w.log(`Virus lineage #${this.lineages} emerges`);
@@ -58,6 +60,7 @@ export class Viruses {
             for (let k = st[g], e = st[g + 1]; k < e; k++) {
               const c = cells[items[k]];
               if (!c || c.dead || c.infected) continue;
+              if (CFG.VIRUS_DOMAIN && !v.euk !== !c.mito) continue; // wrong kind of host: can't even attach
               const dx = c.x - v.x, dy = c.y - v.y;
               if (dx * dx + dy * dy > (c.r + 0.1) * (c.r + 0.1)) continue;
               // Binding: the virus's key must fit the cell's receptor shape.
@@ -107,7 +110,9 @@ export class Viruses {
         cargo = { i, v: c.g[i] };
       }
       const clamp = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-      this.pending.push(this.make(c.x + Math.cos(a) * r, c.y + Math.sin(a) * r, clamp(inf.k1 + rng.gauss() * CFG.VIRUS_MUT), clamp(inf.k2 + rng.gauss() * CFG.VIRUS_MUT), inf.lineage, cargo));
+      // Progeny infect the same kind of host, except for the rare host jump to the other domain.
+      const euk = CFG.VIRUS_DOMAIN && rng.next() < CFG.VIRUS_JUMP ? !c.mito : c.mito;
+      this.pending.push(this.make(c.x + Math.cos(a) * r, c.y + Math.sin(a) * r, clamp(inf.k1 + rng.gauss() * CFG.VIRUS_MUT), clamp(inf.k2 + rng.gauss() * CFG.VIRUS_MUT), inf.lineage, cargo, euk));
     }
     this.stats.bursts++;
     if (n > 0) { c.next = this.pending.at(-1); c.nextWhy = `burst open, releasing ${n} new viruses; following one`; }

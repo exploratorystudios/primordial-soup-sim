@@ -70,6 +70,7 @@ CONFIGS = {
     # random. The nutrient cuts (75% supply, 8x burial in oxygen) kept worlds below the cap but starved eukaryotes
     # (peak population 26 -> 5 in euk2), so test the bigger cap with the nutrient settings both ways. Kin recognition
     # (KIN_SPARE: predators spare their own species unless starving) is now a default; one setting turns it off.
+    # Also new by default: viruses infect only their own domain (bacteria or eukaryotes), with rare host jumps.
     "cap6k_old_nut":  {"MAX_CELLS": 6000, "VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
     "cap12k_old_nut": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
     "cap12k_old_nut_kin_off": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1, "KIN_SPARE": 0},  # eats own kin

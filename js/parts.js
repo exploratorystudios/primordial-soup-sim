@@ -756,9 +756,9 @@ function virusParts(s) {
 function virusInfo(s) {
   const v = s.obj;
   return {
-    title: `Virus (phage) · lineage #${v.lineage}`,
-    kv: [['Size', '≈ 100 nm head, 200 nm tail'], ['Binding key', `${v.k1.toFixed(2)} / ${v.k2.toFixed(2)}`], ['Age', `${v.age} ticks`], ['Carries host gene', v.cargo ? (Gn.GENE_NAMES[v.cargo.i] || `#${v.cargo.i}`) : 'no']],
-    desc: 'Not alive on its own: a packaged genome that drifts until it meets a cell with matching receptors, takes it over, and bursts it to release ~10–40 copies.',
+    title: `${v.euk ? 'Eukaryotic virus' : 'Virus (phage)'} · lineage #${v.lineage}`,
+    kv: [['Infects', v.euk ? 'eukaryotes only' : 'bacteria only'], ['Size', v.euk ? '≈ 100 nm capsid' : '≈ 100 nm head, 200 nm tail'], ['Binding key', `${v.k1.toFixed(2)} / ${v.k2.toFixed(2)}`], ['Age', `${v.age} ticks`], ['Carries host gene', v.cargo ? (Gn.GENE_NAMES[v.cargo.i] || `#${v.cargo.i}`) : 'no']],
+    desc: 'Not alive on its own: a packaged genome that drifts until it meets a cell with matching receptors, takes it over, and bursts it to release ~10–40 copies.' + (v.euk ? ' Eukaryotic viruses are tailless capsids; they arise when a virus lineage makes a rare jump from bacteria to eukaryotes.' : ' Bacteriophages cannot infect eukaryotes: their surfaces and machinery are too different.'),
   };
 }
 

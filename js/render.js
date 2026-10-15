@@ -1819,13 +1819,30 @@ export class Renderer {
       for (const v of list) if (!v._esc && this.inView(v.x, v.y, R * 4)) ctx.fillRect(v.x - cx - h, v.y - cy - h, 2 * h, 2 * h);
       return;
     }
-    for (const v of list) if (!v._esc && this.inView(v.x, v.y, R * 4)) this.drawVirus(v.x, v.y, v.ang);
+    for (const v of list) if (!v._esc && this.inView(v.x, v.y, R * 4)) this.drawVirus(v.x, v.y, v.ang, v.euk);
   }
 
   // A tailed bacteriophage: icosahedral head (~100 nm), contractile tail, tail fibres.
-  drawVirus(x, y, ang) {
+  // Eukaryotic viruses are drawn as tailless icosahedral capsids with surface spikes, in violet.
+  drawVirus(x, y, ang, euk = false) {
     const ctx = this.ctx;
     this.nmFrame(x, y, ang);
+    if (euk) {
+      ctx.strokeStyle = '#e0b8ff'; ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; ctx.moveTo(Math.cos(a) * 50, Math.sin(a) * 50); ctx.lineTo(Math.cos(a) * 64, Math.sin(a) * 64); }
+      ctx.stroke();
+      ctx.fillStyle = '#b48cff'; ctx.strokeStyle = '#efe0ff';
+      ctx.beginPath(); this.poly(0, 0, 50, 6, Math.PI / 6); ctx.fill(); ctx.stroke();
+      if (this.pxnm >= 0.25) {
+        ctx.strokeStyle = 'rgba(255,209,102,0.9)'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let k = 0; k < 120; k++) { const a = k * 0.55, r = 4 + k * 0.28; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
     ctx.fillStyle = '#9fc04a';
     ctx.fillRect(-9, 40, 18, 110);
     ctx.strokeStyle = '#cfe98a'; ctx.lineWidth = 5;
