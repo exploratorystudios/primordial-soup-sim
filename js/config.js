@@ -18,6 +18,7 @@ export const CFG = {
   WEATHERING: 0.16,         // minerals washed in at the surface (rivers, dust)
   O2_REF: 1.5,               // oxygen level considered "fully oxygenated"
   DAY_LENGTH: 4000,
+  DAY_MEAN: 0.65, DAY_SWING: 0.35, // sunlight over a day: DAY_MEAN ± DAY_SWING (night 30%, noon 100%)
   LIGHT_DEPTH: 1.6,        // light attenuation with depth
   CURRENT: 0.12,
   CELL_DRIFT: 1.2,         // how strongly currents carry cells (microbes are mostly passive)

@@ -172,7 +172,7 @@ export class World {
   // --------------------------------------------------------------------- step
   step() {
     if (this.smooth) this.capturePrev();
-    this.dayFactor = 0.65 + 0.35 * Math.sin((this.t * 2 * Math.PI) / CFG.DAY_LENGTH);
+    this.dayFactor = CFG.DAY_MEAN + CFG.DAY_SWING * Math.sin((this.t * 2 * Math.PI) / CFG.DAY_LENGTH);
     if (this.t % 20 === 0) this.updateCurrents();
     this.stepFields();
     // Once life is established the soup is a slow-changing backdrop: step it every third tick.

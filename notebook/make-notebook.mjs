@@ -66,17 +66,19 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # The current simulation: protocells draw in nucleotides from further away while the ocean is lifeless
-    # (early reach 4 instead of 1.5), fading as life spreads (halved at 50 living cells). Adopted after a
-    # 4-way run (results-pool3.jsonl): life started in 28/28 worlds and no later stage changed significantly.
-    "new_default": {},
-    "old_default": {"VES_NT_REACH_EARLY": None},   # before that change: reach 1.5 throughout
+    # Why do some worlds never reach the Great Oxidation? In those, photosynthesis stays near the vents at the
+    # bottom (dim, and vent chemicals soak up the oxygen) and never colonises the bright upper ocean. Nights cut
+    # sunlight to 30% every 4,000 ticks. Do the nights hurt, or is there just not enough light?
+    "baseline":      {},                                       # sun 30%-100%, 4,000-tick days
+    "steady_sun":    {"DAY_SWING": 0},                         # constant 65%: same average, no nights
+    "bright_nights": {"DAY_MEAN": 0.8, "DAY_SWING": 0.2},      # 60%-100%: more light overall
+    "long_days":     {"DAY_LENGTH": 12000},                    # 30%-100% but 12,000-tick days (and nights)
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "pool4"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "sun1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
