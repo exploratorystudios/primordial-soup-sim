@@ -66,21 +66,20 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # The defaults now include everything adopted from the tests so far (nutrient supply 75% with the starting
-    # stock full, nutrient buried 8x faster in oxygenated water). Two questions:
-    # 1) Do the new nutrient defaults keep everything else intact? (vs the nutrient settings before them)
-    # 2) Why don't eukaryotes build organisms? Each world's trace now also records, every 2,000 ticks: eukaryotic
-    #    organisms (colonies), the largest, its most specialised cell types, how many have a germline, and the
-    #    eukaryotes' mean adhesion (trace columns 9-13).
-    "defaults":     {},
-    "pre_nutrient": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
+    # The population cap (for CPU) is now 12,000: worlds kept filling the 6,000 cap, whose safety valve culls cells at
+    # random. The nutrient cuts (75% supply, 8x burial in oxygen) kept worlds below the cap but starved eukaryotes
+    # (peak population 26 -> 5 in euk2), so test the bigger cap with the nutrient settings both ways.
+    "cap6k_old_nut":  {"MAX_CELLS": 6000, "VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
+    "cap12k_old_nut": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 1},
+    "cap12k_mid_nut": {"VENT_NUT": 0.1, "WEATHERING": 0.16, "NUT_RUST": 2},
+    "cap12k":         {},                               # today's defaults
 }
 TICKS = 80_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
-SEEDS_PER_CONFIG = 56     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 7001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+SEEDS_PER_CONFIG = 28     # None: chosen from the number of cores (one full wave)
+FIRST_SEED = 8001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "euk2"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "cap1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
@@ -132,7 +131,7 @@ def free_gb():
     return avail
 
 cores, mem = usable_cores(), free_gb()
-GB_PER_WORLD = 0.6        # a late-game world with ~4,000 cells peaks around this
+GB_PER_WORLD = 1.2        # a late-game world with ~12,000 cells peaks around this
 if WORKERS is None:
     WORKERS = max(1, min(cores, int(mem / GB_PER_WORLD)))
 if SEEDS_PER_CONFIG is None:

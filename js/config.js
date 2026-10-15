@@ -64,7 +64,7 @@ export const CFG = {
   MAX_ORIGINS_POP: 200,    // stop new abiogenesis once life is this abundant
 
   // ---- Life ---------------------------------------------------------------
-  MAX_CELLS: 6000,         // population cap (was 4,000: worlds sat at it, crowding out slow-growing eukaryotes)
+  MAX_CELLS: 12000,        // population cap, for CPU (was 4,000, then 6,000: worlds sat at it and its safety valve culled at random)
   LIFE_HASH: 24,
   MAX_R: 14,
   CAP_K: 20,
