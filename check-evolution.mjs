@@ -44,18 +44,21 @@ if (args.worker !== undefined) {
   };
   const t0 = Date.now();
   let peakCells = 0;
+  const trace = []; // [tick, cells, eukaryotes, predators, photosynthesizers, O2]
   const keys = STAGES.map(([k]) => k);
   while (w.t < ticks) {
     w.step();
     // Every stage reached: no need to keep simulating this world.
     if (w.t % 1000 === 0 && keys.every((k) => w.mset.has(k))) break;
     if (w.t % 1000 === 0) peakCells = Math.max(peakCells, w.life.cells.length);
+    // A coarse history for diagnosis: population, eukaryotes, predators, photosynthesizers, oxygen.
+    if (w.t % 2000 === 0) { const st = w.life.stats; trace.push([w.t, w.life.cells.length, st.euk, st.pred, st.photosynthesizers, +w.o2.toFixed(3)]); }
     if (w.t % 2000 === 0) process.stderr.write(`PROGRESS ${w.t}\n`);
   }
   const st = w.life.stats;
   const ms = Object.fromEntries(w.milestones.map((m) => [m.key, m.t]));
   console.log(JSON.stringify({
-    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000, ticks: w.t, node: process.version, cfg: args.cfg ? JSON.parse(args.cfg) : {}, origins: w.life.origins, founders,
+    seed: +args.seed, ms, secs: (Date.now() - t0) / 1000, ticks: w.t, node: process.version, trace, deaths: w.life.deaths, cfg: args.cfg ? JSON.parse(args.cfg) : {}, origins: w.life.origins, founders,
     geneNames: args.genes ? Gn.GENE_NAMES.slice(0, Gn.DIFF) : undefined,
     final: { cells: w.life.cells.length, peakCells, species: st.speciesAlive, euk: st.euk, multi: st.multicellular, largest: st.largest, viruses: w.viruses ? w.viruses.list.length : 0, o2: +w.o2.toFixed(2), era: w.era().name },
   }));

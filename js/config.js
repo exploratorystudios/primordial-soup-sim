@@ -79,6 +79,11 @@ export const CFG = {
   MIN_DIV_AGE: 40,
   PRED_P: 0.25,
   ENDO_P: 0.05,
+  // Endosymbiosis by partnership (closer to the leading hypothesis: an archaeal host and an aerobic bacterium
+  // living in close contact merge, without the host hunting): chance per contact. 0 = only the predation route.
+  SYMBIO_P: 0,
+  MITO_AER: 0,             // aerobic capacity a eukaryote gets from its mitochondria (0 = only its own gene)
+  SYMBIO_O2: 0.05,         // local oxygen (fraction of O2_REF) the partnership needs
   HGT_P: 0.0004,
   SPECIATE: 0.07,
   DAMP: 0.82,

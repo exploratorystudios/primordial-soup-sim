@@ -66,23 +66,23 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # 1) Longer-lived oxygen (OXY_DECAY 0.0005, ~3x the half-life) doubled the Great Oxidation and eukaryotes in
-    #    earlier runs, but on reused seeds: this run uses fresh ones (FIRST_SEED below).
-    # 2) REALISTIC_MULTI, multicellularity as on Earth: bacteria still make colonies and simple multicellular
-    #    organisms (no mouth or germline cells), complex organisms are eukaryotic, and bodies above 16 cells
-    #    need local oxygen (up to 62 cells when fully oxygenated).
-    # (No baseline here: the current default already has 54 worlds in results-pool4.jsonl, "new_default",
-    # and the code is unchanged for it; merge those in for the comparison.)
-    "o2_x3":      {"OXY_DECAY": 0.0005},
-    "o2_x3_real": {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True},
-    "o2_x2_real": {"OXY_DECAY": 0.00075, "REALISTIC_MULTI": True},
+    # All with longer-lived oxygen and Earth-like multicellularity (complex organisms must be eukaryotic). In run
+    # real1 that gave no complex life: eukaryotes were rare and died out. Staged tests showed oxygen poisons them
+    # unless their mitochondria give them aerobic respiration (MITO_AER), which on Earth is what mitochondria do.
+    # Reference without these: o2_x3_real in results-real1.jsonl (same seeds, 1001-1040).
+    "mito":            {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9},
+    # ...plus mitochondria by partnership (host and aerobe in contact merge; no hunting needed), two rates:
+    "mito_sym_lo":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.0001},
+    "mito_sym_hi":     {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001},
+    # ...plus predators catching prey more often (PRED_P 0.25 -> 0.4), so hunting pays and is less rare:
+    "mito_sym_pred":   {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True, "MITO_AER": 0.9, "SYMBIO_P": 0.001, "PRED_P": 0.4},
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
-SEEDS_PER_CONFIG = 26     # None: chosen from the number of cores (one full wave)
-FIRST_SEED = 1001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
+SEEDS_PER_CONFIG = 40     # None: chosen from the number of cores (one full wave)
+FIRST_SEED = 1001          # (same seeds as real1, to compare with its o2_x3_real) use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "real1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "euk1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------

@@ -73,6 +73,7 @@ export function decode(c) {
   c.effP = eff(p); c.effC = eff(ch); c.effH = eff(h); c.effPred = eff(pr);
   c.motil = g[Gn.MOTIL];
   c.aer = g[Gn.AEROBIC];
+  if (c.mito && CFG.MITO_AER > c.aer) c.aer = CFG.MITO_AER; // mitochondria are the cell's aerobic machinery
   c.armor = g[Gn.ARMOR];
   c.adh = g[Gn.ADHES];
   c.share = g[Gn.SHARE];
@@ -411,7 +412,8 @@ export class Life {
         a.x -= nx * ov * (b.area / s); a.y -= ny * ov * (b.area / s);
         b.x += nx * ov * (a.area / s); b.y += ny * ov * (a.area / s);
         if (a.org === b.org) return;
-        if (!this.tryEat(a, b)) this.tryEat(b, a);
+        const ate = this.tryEat(a, b) || this.tryEat(b, a);
+        if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
         if (!a.dead && !b.dead && rng.next() < CFG.HGT_P) this.transferGene(a, b);
       });
     }
@@ -439,6 +441,36 @@ export class Life {
 
   bodyRadius(c) { return c.orgSize > 1 ? c.r * Math.sqrt(c.orgSize) * 0.8 : c.r; }
 
+  // The host takes in an aerobic bacterium for good: it becomes a mitochondrion and the host a eukaryote.
+  becomeEukaryote(a, b, text) {
+    a.mito = true;
+    b.endosymbiont = true;
+    a.endoT = this.w.t; // its mitochondria will multiply from this one
+    const r0 = a.r;
+    decode(a);
+    a.rTarget = a.r; a.r = r0; this.resize(a); // grows into a eukaryote rather than popping
+    a.species = this.newSpecies(a, a.species).id;
+    this.species.get(a.species).euk = true;
+    this.w.milestone('eukaryote', text, a);
+  }
+
+  // Endosymbiosis by partnership: a host with a DNA genome and proteins (think archaeon) living in contact
+  // with an aerobic bacterium sometimes merges with it, no hunting needed (cf. the hydrogen and syntrophy
+  // hypotheses for the origin of mitochondria).
+  trySymbiosis(a, b) {
+    if (a.mito || b.mito || !a.dna || a.transl <= 0.5 || b.aer <= 0.5 || a.r < b.r) return false;
+    const F = this.w.fields, rng = this.w.rng;
+    if (Math.min(1, F.get(F.oxygen, a.x, a.y) / CFG.O2_REF) < CFG.SYMBIO_O2 || rng.next() >= CFG.SYMBIO_P) return false;
+    a.nut += b.nut; b.nut = 0;
+    if (a.nut > a.nutNeed) { F.add(F.nutrient, a.x, a.y, a.nut - a.nutNeed); a.nut = a.nutNeed; }
+    this.becomeEukaryote(a, b, 'Endosymbiosis! An aerobic bacterium living with its host moves in for good and becomes a mitochondrion: the first eukaryote');
+    b.next = a;
+    b.nextWhy = `merged with its partner, cell #${a.id}, and lives on inside it as a mitochondrion`;
+    this.w.emit('engulf', 30, { pred: a, prey: snap(b), endo: true });
+    this.kill(b, 'symbiosis', true);
+    return true;
+  }
+
   tryEat(a, b) {
     if (a.dead || b.dead) return false;
     const pa = a.effPred * TM[a.type][3];
@@ -460,15 +492,7 @@ export class Life {
     // Endosymbiosis: sometimes the meal survives inside its host.
     // Only cells that already store their genome as DNA (and make proteins) can host one.
     if (!a.mito && a.dna && a.transl > 0.5 && b.aer > 0.5 && o2f > 0.15 && rng.next() < CFG.ENDO_P) {
-      a.mito = true;
-      b.endosymbiont = true;
-      a.endoT = this.w.t; // its mitochondria will multiply from this one
-      const r0 = a.r;
-      decode(a);
-      a.rTarget = a.r; a.r = r0; this.resize(a); // grows into a eukaryote rather than popping
-      a.species = this.newSpecies(a, a.species).id;
-      this.species.get(a.species).euk = true;
-      this.w.milestone('eukaryote', 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote', a);
+      this.becomeEukaryote(a, b, 'Endosymbiosis! An engulfed aerobe becomes a mitochondrion: the first eukaryote');
     } else if (a.mito && !a.plastid && b.effP > 0.25 && rng.next() < CFG.ENDO_P) {
       a.plastid = true;
       b.endosymbiont = true;
