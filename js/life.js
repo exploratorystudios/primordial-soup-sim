@@ -22,7 +22,6 @@ const TM = [
 ];
 
 const snap = (c) => ({ x: c.x, y: c.y, r: c.r, col: c.trophColor, mito: c.mito, id: c.id });
-const CUR = { x: 0, y: 0 };
 
 export class Cell {
   constructor(id, x, y, g, parent) {
@@ -50,6 +49,7 @@ export class Cell {
     this.x0 = x; this.y0 = y;
     // Properties set later on (or by the renderer), declared up front in a fixed order: cells then all share
     // one internal shape, which keeps every loop over them fast.
+    this.slot = -1; this.sv = 0; // slot in the shared arrays (kernels.js) and version of the traits written there
     this.dirX = undefined; this.dirY = undefined; this.rTarget = undefined; this.mitoN = undefined;
     this.born = 0; this.sexual = false; this.founderSeq = null; this.fromProtocell = false; this.endosymbiont = false;
     this.next = null; this.nextWhy = ''; this._dividing = false; this._fade = undefined;
@@ -58,6 +58,7 @@ export class Cell {
 }
 
 export function decode(c) {
+  c.sv = (c.sv | 0) + 1; // traits change: rewrite them to the shared arrays
   const g = c.g;
   // Radius in world units (0.5 µm): prokaryotes 1–3.5 µm across, eukaryotes 6–30 µm.
   const rNow = c.r, growing = c.rTarget !== undefined;
@@ -113,6 +114,7 @@ export class Life {
     this.w = world;
     this.cells = [];
     this.newborns = [];
+    this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
     this.xs = new Float32Array(4096);
     this.ys = new Float32Array(4096);
@@ -198,11 +200,17 @@ export class Life {
       for (let i = 0; i < n; i++) { const w = this.weakness(cells[i]); sw += w * w; }
       this.meanWeak = sw / n || 1;
     }
-    // The heavy per-cell work runs in parallel phases (kernels.js); light, sensing and steering first.
+    // The heavy per-cell work runs in parallel phases (kernels.js): metabolism, sensing and steering, then
+    // sharing out each field square's chemicals, food and nutrient; each cell then finishes its tick here.
+    this.assignSlots();
     this.prepareKernels(n);
-    this.packCells(this.V);
-    this.runPhase(this.V, 'steer');
-    for (let i = 0; i < n; i++) if (!cells[i].dead) this.live(cells[i], i);
+    const V = this.V, F = this.w.fields;
+    this.packCells(V);
+    this.runPhase(V, 'cells');
+    this.groupByField(V);
+    this.runPhase(V, 'share');
+    F.chem.set(V.FCHEM); F.organic.set(V.FORG); F.nutrient.set(V.FNUT); F.oxygen.set(V.FOXY);
+    for (let k = 0; k < n; k++) if (!cells[k].dead) this.live(cells[k]);
     this.interact();
     if (this.w.t % 2 === 0) this.relax();
     this.physics();
@@ -210,6 +218,7 @@ export class Life {
 
     let anyDead = false;
     for (let i = 0; i < n; i++) if (cells[i].dead) { anyDead = true; break; }
+    if (anyDead) for (const c of cells) if (c.dead && c.slot >= 0) { this.slotCell[c.slot] = null; this.freeSlots.push(c.slot); c.slot = -1; }
     this.cells = anyDead ? cells.filter((c) => !c.dead) : cells;
     for (const c of this.newborns) if (!c.dead) this.cells.push(c);
     this.newborns = [];
@@ -228,68 +237,26 @@ export class Life {
 
   // Apply a new radius and everything that scales with it.
   resize(c) {
+    c.sv++;
     c.area = (c.r / 2) * (c.r / 2);
     c.m = Math.pow(c.area, 0.75);
     c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1);
     c.nutNeed = c.m * CFG.NUT_PER_AREA * 2 * (c.mito ? CFG.EUK_NUT : 1);
   }
 
-  live(c, i) {
-    const w = this.w, F = w.fields, rng = w.rng, g = c.g, tm = TM[c.type];
+  live(c) {
+    const w = this.w, rng = w.rng, tm = TM[c.type], V = this.V, s = c.slot;
     c.age++;
     // After endosymbiosis the new organelle divides inside its host: one, then two, four...
     if (c.endoT !== undefined) c.mitoN = Math.min(99, 1 + Math.floor((w.t - c.endoT) / 40));
-    if (c.rTarget !== undefined) {
-      c.r = Math.min(c.rTarget, c.r + 0.04); // ~0.02 µm per tick
-      this.resize(c);
-      if (c.r >= c.rTarget) c.rTarget = undefined;
-    }
-    // Self-shading: light falls when neighbours cover much of the area around the cell.
-    const sq = CFG.LIFE_HASH * CFG.LIFE_HASH;
-    const shade = this.coverage[this.hash.cell(c.x, c.y)] - Math.min(Math.PI * c.r * c.r, sq) / sq;
-    let light = this.V.LIGHTOUT[i]; // (computed in the steer phase; the cell hasn't moved since)
-    if (shade > 0.35) light /= 1 + (shade - 0.35) * 3;
-    const o2 = F.get(F.oxygen, c.x, c.y);
-    const o2f = o2 > CFG.O2_REF ? 1 : o2 / CFG.O2_REF;
-    const resp = 1 + c.aer * CFG.AERO_BONUS * o2f * (c.mito ? 2.5 : 1);
-
-    let gain = 0;
-    const ep = c.effP * tm[0];
-    if (ep > 0) {
-      const gp = light * CFG.PHOTO_K * c.m * ep * (c.plastid ? 1.8 : 1) * c.prot;
-      gain += gp;
-      // Oxygenic photosynthesis needs strong light; dim vent-light photosynthesis is anoxygenic.
-      const sun = w.sunAt(c.y);
-      F.add(F.oxygen, c.x, c.y, gp * CFG.O2_YIELD * Math.min(1, sun * 2));
-    }
-    const ec = c.effC * tm[1];
-    if (ec > 0) gain += F.take(F.chem, c.x, c.y, CFG.CHEMO_K * c.m * ec) * CFG.CHEMO_EFF * c.prot;
-    const eh = c.effH * tm[2];
-    if (eh > 0) gain += F.take(F.organic, c.x, c.y, CFG.HET_K * c.m * eh) * CFG.HET_EFF * resp * c.prot;
-
-    let cost = CFG.BASE_COST * c.m * (c.mito ? 1.25 : 1) * tm[6] * (1 + 0.25 * g[Gn.LIFESPAN])
-      + c.aer * CFG.AER_COST * c.m
-      + c.armor * tm[5] * CFG.ARM_COST * c.m
-      + c.adh * CFG.ADH_COST
-      + (c.effP + c.effC + c.effH + c.effPred) * CFG.MACHINE_COST * c.m
-      + c.transl * CFG.RIBOSOME_COST * c.m      // building and running ribosomes
-      + c.resist * CFG.RESIST_COST * c.m        // antiviral defence
-      // RNA genomes break easily and need constant repair, worse once oxygen appears.
-      + (CFG.DNA_COST * c.dnaLevel + CFG.RNA_GENOME_COST * (1 - c.dnaLevel) * (1 + 2 * o2f)) * c.m;
-    if (c.infected) cost += CFG.BASE_COST * c.m; // the virus hijacks the cell's machinery
-    // Oxygen is toxic to cells without antioxidant / aerobic machinery.
-    const tox = o2f - 1.3 * c.aer - (g[Gn.PHOTO] > 0.4 ? 0.3 : 0);
-    let toxCost = 0;
-    if (tox > 0) toxCost = tox * CFG.TOX * c.m;
-    c.energy += gain - cost - toxCost;
+    // Metabolism was worked out in the cells and share phases: energy gained minus upkeep, and nutrient.
+    c.energy += V.DE[s];
     if (c.energy > c.cap) c.energy = c.cap;
 
-    this.steer(c, tm, i);
+    this.steer(c, tm, s);
+    c.nut += V.GNUT[s];
 
-    // Building a body needs scarce nutrient: this is what really limits the biosphere.
-    if (c.nut < c.nutNeed) c.nut += F.take(F.nutrient, c.x, c.y, Math.min(c.nutNeed - c.nut, CFG.NUT_UPTAKE * c.m));
-
-    if (c.energy <= 0) { this.kill(c, toxCost > cost * 0.5 ? 'oxygen' : 'starved', false); return; }
+    if (c.energy <= 0) { this.kill(c, (V.OUTF[s] & K.O_OXDEATH) ? 'oxygen' : 'starved', false); return; }
     if (c.age > c.lifespan || rng.next() < 0.00003) { this.kill(c, 'aged', false); return; }
     // An infected cell bursts when the viruses inside it are ready.
     if (c.infected && w.t >= c.infected.t) { if (w.viruses) w.viruses.lyse(c); this.kill(c, 'virus', false); return; }
@@ -305,31 +272,48 @@ export class Life {
     if (c.type === T_GERM && c.bonds.length && c.orgSize >= 6 && c.energy > 0.7 * c.cap) {
       const fromOrganism = c.orgSize >= 8;
       for (const o of c.bonds.slice()) unlink(c, o);
-      c.type = T_GENERIC; c.orgSize = 1; c.org = c.id;
+      c.type = T_GENERIC; c.sv++; c.orgSize = 1; c.org = c.id;
       if (fromOrganism && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell buds off to found the next generation of a multicellular organism', c);
     }
 
     if (c.energy > c.cap * c.divFrac && c.nut >= c.nutNeed && c.age > CFG.MIN_DIV_AGE && this.cells.length + this.newborns.length < CFG.MAX_CELLS) {
       this.divide(c);
     }
+    // A new eukaryote grows into its full size gradually (~0.02 µm per tick).
+    if (c.rTarget !== undefined) {
+      c.r = Math.min(c.rTarget, c.r + 0.04);
+      this.resize(c);
+      if (c.r >= c.rTarget) c.rTarget = undefined;
+      V.R[s] = c.r; V.AREA[s] = c.area; // (collisions this tick use the new size)
+    }
   }
 
   // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
-  steer(c, tm, i) {
+  steer(c, tm, s) {
     const mot = c.motil * tm[4];
     if (mot < 0.03) return;
-    const V = this.V, f = V.OUTF[i];
-    if (f & K.O_SENSED) { c.px = V.PX[i]; c.py = V.PY[i]; c.fx = V.FX[i]; c.fy = V.FY[i]; }
-    if (f & K.O_RETHINK) { c.heading = V.HEADOUT[i]; c.dirX = V.DIRX[i]; c.dirY = V.DIRY[i]; }
+    const V = this.V, f = V.OUTF[s];
+    if (f & K.O_SENSED) { c.px = V.PX[s]; c.py = V.PY[s]; c.fx = V.FX[s]; c.fy = V.FY[s]; }
+    if (f & K.O_RETHINK) { c.heading = V.HEAD[s] = V.HEADOUT[s]; c.dirX = V.DIRX[s]; c.dirY = V.DIRY[s]; }
     const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
     c.vx += c.dirX * th; c.vy += c.dirY * th;
     c.energy -= mot * CFG.MOT_COST * c.m;
   }
 
   // ---------------------------------------------------------------- parallel phases (kernels.js, pool.js)
-  // Shared (or local) arrays for this tick, with the grid, predator grid, fields and light settings copied in.
+  // A slot for every cell that doesn't have one yet (newborns, a loaded world).
+  assignSlots() {
+    for (const c of this.cells) {
+      if (c.slot >= 0 && this.slotCell[c.slot] === c) continue;
+      const s = this.freeSlots.length ? this.freeSlots.pop() : this.nextSlot++;
+      c.slot = s; this.slotCell[s] = c;
+    }
+  }
+
+  // Shared (or local) arrays for this tick, with the grids, fields and light settings copied in.
   prepareKernels(n) {
-    const w = this.w, F = w.fields, h = this.hash, V = kernelViews(n, (w.viruses ? w.viruses.list.length : 0) + 64, h.nc, F.n, w.sunTable.length);
+    const w = this.w, F = w.fields, h = this.hash, cells = this.cells;
+    const V = kernelViews(this.nextSlot + 16, (w.viruses ? w.viruses.list.length : 0) + 64, h.nc, F.n, w.sunTable.length);
     this.V = V;
     const P = V.P;
     P[K.P_T] = w.t; P[K.P_SEED] = w.seed | 0; P[K.P_MAXR] = this.maxR;
@@ -338,43 +322,81 @@ export class Life {
     const nv = Math.min(w.vents.length, K.MAX_VENTS);
     P[K.P_NVENTS] = nv;
     for (let k = 0; k < nv; k++) { const v = w.vents[k]; P[K.P_VENTS + k * 3] = v.x; P[K.P_VENTS + k * 3 + 1] = v.y; P[K.P_VENTS + k * 3 + 2] = v.strength; }
-    P[K.P_N] = n; P[K.P_SEGCAP] = V.segCap; P[K.P_VSEGCAP] = V.vsegCap; P[K.P_HGT] = CFG.HGT_P; P[K.P_SYMB] = CFG.SYMBIO_P > 0 ? 1 : 0;
-    V.HSTART.set(h.start.subarray(0, h.nc + 1)); V.HITEMS.set(h.items.subarray(0, n));
+    P[K.P_N] = n; P[K.P_FN] = F.n; P[K.P_SEGCAP] = V.segCap; P[K.P_VSEGCAP] = V.vsegCap; P[K.P_HGT] = CFG.HGT_P; P[K.P_SYMB] = CFG.SYMBIO_P > 0 ? 1 : 0;
+    P[K.P_O2REF] = CFG.O2_REF; P[K.P_AERO] = CFG.AERO_BONUS; P[K.P_O2YIELD] = CFG.O2_YIELD; P[K.P_SQ] = CFG.LIFE_HASH * CFG.LIFE_HASH;
+    P[K.P_DAMP] = CFG.DAMP; P[K.P_DRIFT] = CFG.CELL_DRIFT; P[K.P_W] = CFG.W; P[K.P_REACH] = CFG.H * CFG.PLUME_REACH;
+    // Grids hold slots.
+    V.HSTART.set(h.start.subarray(0, h.nc + 1));
+    for (let e = 0; e < n; e++) V.HITEMS[e] = cells[h.items[e]].slot;
     const ph = this.predHash, np = ph.start[ph.nc];
-    V.PSTART.set(ph.start.subarray(0, ph.nc + 1)); V.PITEMS.set(ph.items.subarray(0, np)); V.PIDX.set(this.pidx.subarray(0, np));
-    V.FCHEM.set(F.chem); V.FORG.set(F.organic); V.FOXY.set(F.oxygen); V.SUN.set(w.sunTable);
+    V.PSTART.set(ph.start.subarray(0, ph.nc + 1)); V.PITEMS.set(ph.items.subarray(0, np));
+    for (let p = 0; p < np; p++) V.PIDX[p] = cells[this.pidx[p]].slot;
+    V.COV.set(this.coverage);
+    V.FCHEM.set(F.chem); V.FORG.set(F.organic); V.FOXY.set(F.oxygen); V.FNUT.set(F.nutrient); V.SUN.set(w.sunTable);
+    V.CURX.set(w.curX); V.CURY.set(w.curY);
   }
 
-  // Copy the cells' state into the arrays, once per tick; later phases only refresh what changed.
+  // This tick's order and the cells' changing state; traits only for cells whose version changed (or for
+  // every cell when these arrays last served another world).
   packCells(V) {
+    if (V.owner !== this) { V.SVER.fill(-1); V.owner = this; }
     const cells = this.cells, n = cells.length;
-    for (let i = 0; i < n; i++) {
-      const c = cells[i], g = c.g;
-      V.X[i] = c.x; V.Y[i] = c.y; V.R[i] = c.r; V.AREA[i] = c.area; V.ORG[i] = c.org;
-      let f = c.dead ? K.F_DEAD : 0;
-      if (c.mito) f |= K.F_MITO;
+    for (let k = 0; k < n; k++) {
+      const c = cells[k], s = c.slot;
+      V.ORDER[k] = s; V.RANK[s] = k;
+      if (V.SVER[s] !== c.sv || V.ID[s] !== c.id) this.packTraits(V, c, s);
+      V.X[s] = c.x; V.Y[s] = c.y; V.ORG[s] = c.org; V.NUT[s] = c.nut;
+      let f = V.SFLAGS[s];
+      if (c.dead) f |= K.F_DEAD;
       if (c.infected) f |= K.F_INFECTED;
       if (c.dirX === undefined) f |= K.F_NODIR;
-      if (c.effPred > 0.05) f |= K.F_HUNTS;
-      if (c.effPred * TM[c.type][3] >= 0.04) f |= K.F_EATS; // (tryEat's first test)
-      if (!c.mito && c.dna && c.transl > 0.5) f |= K.F_SHOST; // (trySymbiosis's tests)
-      if (!c.mito && c.aer > 0.5) f |= K.F_SPART;
-      V.FLAGS[i] = f;
-      V.ID[i] = c.id; V.EFFPRED[i] = c.effPred; V.SENSE[i] = c.sense; V.MOT[i] = c.motil * TM[c.type][4];
-      V.WCHEM[i] = g[Gn.W_CHEM]; V.WORG[i] = g[Gn.W_ORG]; V.WOXY[i] = g[Gn.W_OXY]; V.WLIGHT[i] = g[Gn.W_LIGHT];
-      V.WPREY[i] = g[Gn.W_PREY]; V.WFLEE[i] = g[Gn.W_FLEE];
-      V.HEAD[i] = c.heading; V.PX[i] = c.px; V.PY[i] = c.py; V.FX[i] = c.fx; V.FY[i] = c.fy;
+      V.FLAGS[s] = f;
     }
   }
 
-  // After the cells have lived: positions (a dividing cell shifts), sizes (growing eukaryotes) and deaths.
-  refreshCells(V) {
-    const cells = this.cells, n = cells.length;
-    for (let i = 0; i < n; i++) {
-      const c = cells[i];
-      V.X[i] = c.x; V.Y[i] = c.y; V.R[i] = c.r; V.AREA[i] = c.area;
-      if (c.dead) V.FLAGS[i] |= K.F_DEAD;
-    }
+  // A cell's traits as the kernels use them (rewritten when decode, resize or a new cell type bumps c.sv).
+  packTraits(V, c, s) {
+    const g = c.g, tm = TM[c.type], m = c.m;
+    V.SVER[s] = c.sv; V.ID[s] = c.id; V.R[s] = c.r; V.AREA[s] = c.area;
+    V.EFFPRED[s] = c.effPred; V.SENSE[s] = c.sense; V.MOT[s] = c.motil * tm[4];
+    V.WCHEM[s] = g[Gn.W_CHEM]; V.WORG[s] = g[Gn.W_ORG]; V.WOXY[s] = g[Gn.W_OXY]; V.WLIGHT[s] = g[Gn.W_LIGHT];
+    V.WPREY[s] = g[Gn.W_PREY]; V.WFLEE[s] = g[Gn.W_FLEE];
+    let f = 0;
+    if (c.mito) f |= K.F_MITO;
+    if (c.effPred > 0.05) f |= K.F_HUNTS;
+    if (c.effPred * tm[3] >= 0.04) f |= K.F_EATS; // (tryEat's first test)
+    if (!c.mito && c.dna && c.transl > 0.5) f |= K.F_SHOST; // (trySymbiosis's tests)
+    if (!c.mito && c.aer > 0.5) f |= K.F_SPART;
+    V.SFLAGS[s] = f;
+    const ep = c.effP * tm[0], ec = c.effC * tm[1], eh = c.effH * tm[2];
+    V.PHOTOF[s] = ep > 0 ? CFG.PHOTO_K * m * ep * (c.plastid ? 1.8 : 1) * c.prot : 0;
+    V.DCHEMK[s] = ec > 0 ? CFG.CHEMO_K * m * ec : 0;
+    V.DORGK[s] = eh > 0 ? CFG.HET_K * m * eh : 0;
+    V.CF[s] = CFG.CHEMO_EFF * c.prot; V.HPROT[s] = CFG.HET_EFF * c.prot; V.AER[s] = c.aer;
+    V.COSTS[s] = CFG.BASE_COST * m * (c.mito ? 1.25 : 1) * tm[6] * (1 + 0.25 * g[Gn.LIFESPAN])
+      + c.aer * CFG.AER_COST * m
+      + c.armor * tm[5] * CFG.ARM_COST * m
+      + c.adh * CFG.ADH_COST
+      + (c.effP + c.effC + c.effH + c.effPred) * CFG.MACHINE_COST * m
+      + c.transl * CFG.RIBOSOME_COST * m      // building and running ribosomes
+      + c.resist * CFG.RESIST_COST * m        // antiviral defence
+      + CFG.DNA_COST * c.dnaLevel * m;
+    // RNA genomes break easily and need constant repair, worse once oxygen appears (scaled by oxygen in the kernel).
+    V.RNAF[s] = CFG.RNA_GENOME_COST * (1 - c.dnaLevel) * m;
+    V.TOXB[s] = 1.3 * c.aer + (g[Gn.PHOTO] > 0.4 ? 0.3 : 0); V.TOXM[s] = CFG.TOX * m;
+    V.NUTNEED[s] = c.nutNeed; V.NUTUP[s] = CFG.NUT_UPTAKE * m; V.INFC[s] = CFG.BASE_COST * m;
+    V.HEAD[s] = c.heading; V.PX[s] = c.px; V.PY[s] = c.py; V.FX[s] = c.fx; V.FY[s] = c.fy;
+  }
+
+  // Cells grouped by field square (in their order), for the share phase.
+  groupByField(V) {
+    const n = this.cells.length, fn = V.fn, FS = V.FSTART, ORDER = V.ORDER, FI = V.FI, FLAGS = V.FLAGS;
+    if (!this.fcur || this.fcur.length !== fn) this.fcur = new Int32Array(fn);
+    FS.fill(0);
+    for (let k = 0; k < n; k++) { const s = ORDER[k]; if (!(FLAGS[s] & K.F_DEAD)) FS[FI[s] + 1]++; }
+    for (let q = 0; q < fn; q++) FS[q + 1] += FS[q];
+    const cur = this.fcur; cur.set(FS.subarray(0, fn));
+    for (let k = 0; k < n; k++) { const s = ORDER[k]; if (!(FLAGS[s] & K.F_DEAD)) V.FITEMS[cur[FI[s]]++] = s; }
   }
 
   // Run a phase; if a chunk's list of contacts or candidates overflowed its slot, redo the phase on the main
@@ -413,6 +435,7 @@ export class Life {
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const child = this.makeCell(c.x + ca * c.r * 0.6, c.y + sa * c.r * 0.6, g, c);
     c.x -= ca * c.r * 0.4; c.y -= sa * c.r * 0.4;
+    if (this.V && this.V.owner === this && c.slot >= 0) { this.V.X[c.slot] = c.x; this.V.Y[c.slot] = c.y; }
     const mx = (c.x + child.x) / 2, my = (c.y + child.y) / 2; // where the renderer starts the pinch
     const e = (c.energy - c.cap * CFG.DIV_COST) / 2;
     c.energy = e;
@@ -453,6 +476,7 @@ export class Life {
   kill(c, cause, eaten) {
     if (c.dead) return;
     c.dead = true;
+    if (this.V && this.V.owner === this && c.slot >= 0) this.V.FLAGS[c.slot] |= K.F_DEAD;
     if (!eaten) this.w.emit(cause === 'virus' ? 'burst' : 'die', cause === 'virus' ? 35 : 60, { cell: snap(c), cause });
     if (!c.nextWhy) c.nextWhy = { starved: 'starved', aged: 'died of old age', oxygen: 'was poisoned by oxygen', virus: 'burst, killed by viruses', crowding: 'died in a crowded patch', impact: 'was killed by the asteroid impact' }[cause] || 'died';
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
@@ -470,19 +494,21 @@ export class Life {
   // chance to eat, exchange genes or merge, one pair at a time in a fixed order.
   interact() {
     const cells = this.cells, n = cells.length, V = this.V;
-    this.refreshCells(V);
-    const R = this.runPhase(V, 'contact');
-    for (let i = 0; i < n; i++) { const c = cells[i]; if (!c.dead) { c.x += R.PUSHX[i]; c.y += R.PUSHY[i]; V.X[i] = c.x; V.Y[i] = c.y; } }
-    const chunks = R.P[K.P_CHUNKS], seg = R.P[K.P_SEGCAP];
-    for (let k = 0; k < chunks; k++) {
-      for (let q = k * seg, qe = q + R.EVN[k]; q < qe; q += 3) {
-        const i = R.EV[q], j = R.EV[q + 1], a = cells[i], b = cells[j];
+    const R = this.runPhase(V, 'contact'); // (positions, sizes and deaths in V are current: each change wrote there)
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (c.dead) continue;
+      const s = c.slot;
+      c.x += R.PUSHX[s]; c.y += R.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
+    }
+    const chunks = R.P[K.P_CHUNKS], seg = R.P[K.P_SEGCAP], slotCell = this.slotCell;
+    for (let ch = 0; ch < chunks; ch++) {
+      for (let q = ch * seg, qe = q + R.EVN[ch]; q < qe; q += 3) {
+        const a = slotCell[R.EV[q]], b = slotCell[R.EV[q + 1]];
         if (a.dead || b.dead) continue;
         const ate = this.tryEat(a, b) || this.tryEat(b, a);
         if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
         if (R.EV[q + 2] && !a.dead && !b.dead) this.transferGene(a, b);
-        if (a.dead) V.FLAGS[i] |= K.F_DEAD;
-        if (b.dead) V.FLAGS[j] |= K.F_DEAD;
       }
     }
   }
@@ -491,8 +517,13 @@ export class Life {
   // Extra position-only pass so densely packed cells don't interpenetrate (visible at true scale).
   relax() {
     const cells = this.cells, n = cells.length, V = this.V;
-    this.runPhase(V, 'relax'); // (positions and deaths are current in V: interact kept them up to date)
-    for (let i = 0; i < n; i++) { const c = cells[i]; if (!c.dead) { c.x += V.PUSHX[i]; c.y += V.PUSHY[i]; V.X[i] = c.x; V.Y[i] = c.y; } }
+    this.runPhase(V, 'relax');
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (c.dead) continue;
+      const s = c.slot;
+      c.x += V.PUSHX[s]; c.y += V.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
+    }
   }
 
   bodyRadius(c) { return c.orgSize > 1 ? c.r * Math.sqrt(c.orgSize) * 0.8 : c.r; }
@@ -580,7 +611,7 @@ export class Life {
   }
 
   physics() {
-    const cells = this.cells, rng = this.w.rng, damp = CFG.DAMP, W = CFG.W, H = CFG.H;
+    const cells = this.cells, rng = this.w.rng;
     const broken = [];
     for (const c of cells) {
       if (c.dead) continue;
@@ -611,19 +642,20 @@ export class Life {
     }
     for (let i = 0; i < broken.length; i += 2) unlink(broken[i], broken[i + 1]);
 
-    const V = this.V;
-    for (let i = 0, n = cells.length; i < n; i++) {
-      const c = cells[i];
+    // Currents, plumes, jostling and walls: in parallel (move phase), from positions after the bonds.
+    const V = this.V, n = cells.length;
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
       if (c.dead) continue;
-      this.w.current(c.x, c.y, CUR);
-      // Microbes are carried by the water: currents and vent plumes move them passively.
-      c.vx += (rng.next() - 0.5) * 0.1 + CUR.x * CFG.CELL_DRIFT;
-      c.vy += (rng.next() - 0.5) * 0.1 + CUR.y * CFG.CELL_DRIFT + this.w.plume(c.x, c.y) * 0.3;
-      c.x += c.vx; c.y += c.vy;
-      c.vx *= damp; c.vy *= damp;
-      if (c.x < c.r) { c.x = c.r; c.vx = Math.abs(c.vx) * 0.5; } else if (c.x > W - c.r) { c.x = W - c.r; c.vx = -Math.abs(c.vx) * 0.5; }
-      if (c.y < c.r) { c.y = c.r; c.vy = Math.abs(c.vy) * 0.5; } else if (c.y > H - c.r) { c.y = H - c.r; c.vy = -Math.abs(c.vy) * 0.5; }
-      if (V) { V.X[i] = c.x; V.Y[i] = c.y; } // (the virus search reads these)
+      const s = c.slot;
+      V.X[s] = c.x; V.Y[s] = c.y; V.VXC[s] = c.vx; V.VYC[s] = c.vy;
+    }
+    this.runPhase(V, 'move');
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (c.dead) continue;
+      const s = c.slot;
+      c.x = V.X[s]; c.y = V.Y[s]; c.vx = V.VXC[s]; c.vy = V.VYC[s];
     }
   }
 
@@ -637,7 +669,7 @@ export class Life {
     for (const c of cells) {
       if (c.dead || c._s === stamp) continue;
       c._s = stamp;
-      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.type = T_GENERIC; continue; }
+      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
       q.length = 0; q.push(c);
       let root = c;
       for (let k = 0; k < q.length; k++) {
@@ -657,7 +689,8 @@ export class Life {
       for (const x of comp) {
         x.org = root.id;
         x.orgSize = size;
-        x.type = this.differentiate(x, size, w.lightAt(x.x, x.y));
+        const nt = this.differentiate(x, size, w.lightAt(x.x, x.y));
+        if (nt !== x.type) { x.type = nt; x.sv++; }
         org.types[x.type]++;
         org.x += x.x; org.y += x.y;
       }

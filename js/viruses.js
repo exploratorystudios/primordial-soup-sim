@@ -69,7 +69,7 @@ export class Viruses {
         if (v.dead) continue;
         let used = false;
         for (let q = R.VSTART[k], qe = q + R.VCOUNT[k]; q < qe; q++) {
-          const c = cells[R.VC[q]];
+          const c = L.slotCell[R.VC[q]];
           if (!c || c.dead || c.infected) continue;
           // Binding: the virus's key must fit the cell's receptor shape.
           const d1 = c.g[Gn.REC1] - v.k1, d2 = c.g[Gn.REC2] - v.k2;
