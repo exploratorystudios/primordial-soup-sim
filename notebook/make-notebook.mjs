@@ -1,8 +1,8 @@
-// Build a self-contained Kaggle notebook that replays many worlds under two (or more) settings and
+// Build a self-contained Jupyter notebook (any Jupyter server, or Kaggle) that replays many worlds under two (or more) settings and
 // compares how often each evolutionary stage emerges. The headless simulation is embedded, so the
 // notebook needs nothing else (only Node, which it downloads if the image lacks it).
 //
-//   node kaggle/make-notebook.mjs            -> kaggle/primordial-soup-ab.ipynb
+//   node notebook/make-notebook.mjs          -> notebook/primordial-soup-ab.ipynb
 //
 // Rebuild after changing the simulation, so the notebook runs the current code.
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'kaggle', 'primordial-soup-ab.ipynb');
+const out = path.join(root, 'notebook', 'primordial-soup-ab.ipynb');
 
 // The simulation's own files: everything world.js pulls in, plus the runner.
 const files = new Set();
@@ -32,8 +32,10 @@ let commit = 'unknown';
 try { commit = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim(); } catch { /* not a repo */ }
 const dirty = (() => { try { return execSync('git status --porcelain', { cwd: root }).toString().trim() ? ' (with uncommitted changes)' : ''; } catch { return ''; } })();
 
-const md = (s) => ({ cell_type: 'markdown', metadata: {}, source: lines(s) });
-const code = (s) => ({ cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: lines(s) });
+let cellNo = 0;
+const id = () => `cell-${++cellNo}`;
+const md = (s) => ({ cell_type: 'markdown', id: id(), metadata: {}, source: lines(s) });
+const code = (s) => ({ cell_type: 'code', id: id(), metadata: {}, execution_count: null, outputs: [], source: lines(s) });
 function lines(s) { const a = s.replace(/^\n/, '').split('\n'); return a.map((l, i) => (i < a.length - 1 ? l + '\n' : l)); }
 
 const cells = [
@@ -46,8 +48,10 @@ multicellular → complex organisms), when it happens, and what the first cells'
 
 Simulation code: commit \`${commit}\`${dirty}, built ${new Date().toISOString().slice(0, 10)}.
 
-**Before running:** if the image has no Node.js 18+, the setup cell downloads it, which needs *Internet* switched on
-in the notebook settings. Results are saved after every run (\`results.jsonl\`), so if the session stops, run all
+Works on any Jupyter server (Linux or macOS) and on Kaggle. **Before running:** if there is no Node.js 18+, the setup
+cell downloads it from nodejs.org, and it installs pandas / scipy / matplotlib if they are missing, so it needs internet
+access the first time (on Kaggle: switch *Internet* on). It uses the CPUs and memory your container is actually allowed.
+Results are saved after every world (\`primordial-soup-runs/results-<RUN_TAG>.jsonl\`), so if the kernel stops, run all
 cells again and it carries on where it left off. Change \`RUN_TAG\` to start a fresh experiment.
 `),
   code(`
@@ -63,30 +67,64 @@ TICKS = 70_000            # simulated ticks per world (late stages typically arr
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "pool1"           # results go to results-<RUN_TAG>.jsonl
+RUN_TAG = "pool1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
-# ---- Environment: cores, memory, Node.js ---------------------------------------------------------
-import os, sys, json, shutil, subprocess, platform, tarfile, urllib.request, base64, time
+# ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
+import os, sys, json, shutil, subprocess, platform, tarfile, urllib.request, base64, time, importlib.util
 
-WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.getcwd()
+WORK = "/kaggle/working" if os.path.isdir("/kaggle/working") else os.path.join(os.getcwd(), "primordial-soup-runs")
+os.makedirs(WORK, exist_ok=True)
 SIM = os.path.join(WORK, "primordial-soup")
-cores = os.cpu_count() or 1
-def avail_gb():
+
+missing = [m for m in ("pandas", "scipy", "matplotlib") if importlib.util.find_spec(m) is None]
+if missing:
+    print("Installing", *missing)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True)
+
+def read(path):
     try:
-        for line in open("/proc/meminfo"):
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) / 1e6
+        with open(path) as f:
+            return f.read().strip()
     except OSError:
-        pass
-    return 8.0
-mem = avail_gb()
+        return None
+
+def usable_cores():
+    # The CPUs this process may run on, and any container (cgroup) quota, which os.cpu_count() ignores.
+    n = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    q = read("/sys/fs/cgroup/cpu.max")                          # cgroup v2: "<quota> <period>" or "max ..."
+    if q and not q.startswith("max"):
+        quota, period = map(int, q.split()[:2]); n = min(n, max(1, quota // period))
+    q, p = read("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"), read("/sys/fs/cgroup/cpu/cpu.cfs_period_us")  # v1
+    if q and p and int(q) > 0:
+        n = min(n, max(1, int(q) // int(p)))
+    return n
+
+def free_gb():
+    # Memory still available, within the container's limit if it has one.
+    avail = None
+    for line in (read("/proc/meminfo") or "").splitlines():
+        if line.startswith("MemAvailable:"):
+            avail = int(line.split()[1]) / 1e6
+    if avail is None:
+        try:
+            import psutil; avail = psutil.virtual_memory().available / 1e9
+        except ImportError:
+            avail = 8.0
+    for lim, cur in (("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory.current"),
+                     ("/sys/fs/cgroup/memory/memory.limit_in_bytes", "/sys/fs/cgroup/memory/memory.usage_in_bytes")):
+        L, C = read(lim), read(cur)
+        if L and C and L.isdigit() and int(L) < 1 << 60:
+            avail = min(avail, (int(L) - int(C)) / 1e9)
+    return avail
+
+cores, mem = usable_cores(), free_gb()
 GB_PER_WORLD = 0.6        # a late-game world with ~4,000 cells peaks around this
 if WORKERS is None:
     WORKERS = max(1, min(cores, int(mem / GB_PER_WORLD)))
 if SEEDS_PER_CONFIG is None:
     SEEDS_PER_CONFIG = max(16, WORKERS // len(CONFIGS))
-print(f"{cores} cores, {mem:.0f} GB free -> {WORKERS} worlds at a time; "
+print(f"{cores} usable cores, {mem:.0f} GB free -> {WORKERS} worlds at a time; "
       f"{SEEDS_PER_CONFIG} seeds x {len(CONFIGS)} settings = {SEEDS_PER_CONFIG * len(CONFIGS)} worlds")
 
 def node_version(exe):
@@ -99,13 +137,16 @@ def node_version(exe):
 NODE = shutil.which("node")
 major, ver = node_version(NODE) if NODE else (0, None)
 if major < 18:
-    arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine(), "x64")
-    name = f"node-v20.18.0-linux-{arch}"
+    arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "x64")
+    osname = {"linux": "linux", "darwin": "darwin"}.get(sys.platform)
+    assert osname, "Install Node.js 18+ yourself on this system (automatic download covers Linux and macOS)"
+    name = f"node-v20.18.0-{osname}-{arch}"
     dest = os.path.join(WORK, name)
     if not os.path.isdir(dest):
-        url = f"https://nodejs.org/dist/v20.18.0/{name}.tar.xz"
+        ext = "tar.xz" if osname == "linux" else "tar.gz"
+        url = f"https://nodejs.org/dist/v20.18.0/{name}.{ext}"
         print("Downloading", url)
-        tar = os.path.join(WORK, name + ".tar.xz")
+        tar = os.path.join(WORK, f"{name}.{ext}")
         urllib.request.urlretrieve(url, tar)
         with tarfile.open(tar) as t:
             t.extractall(WORK)
@@ -113,7 +154,7 @@ if major < 18:
     NODE = os.path.join(dest, "bin", "node")
     major, ver = node_version(NODE)
 print("Node", ver, "at", NODE)
-assert major >= 18, "Node.js 18+ is needed (switch Internet on so it can be downloaded)"
+assert major >= 18, "Node.js 18+ is needed (allow internet access so it can be downloaded, or install it)"
 `),
   code(`
 # ---- The simulation (embedded) --------------------------------------------------------------------
