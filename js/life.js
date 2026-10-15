@@ -507,6 +507,7 @@ export class Life {
     if (pa < 0.04) return false;
     // Prey must be engulfable. Being part of a large colony is a defence (cf. Boraas' predation experiments).
     if (this.bodyRadius(a) < this.bodyRadius(b) * 1.2) return false;
+    if (CFG.KIN_SPARE > 0 && a.species === b.species && a.energy > a.cap * CFG.KIN_SPARE) return false; // spares kin unless starving
     const rng = this.w.rng;
     const def = Math.min(0.95, b.armor * TM[b.type][5] * 0.8);
     if (rng.next() > pa * (1 - def) * CFG.PRED_P) return false;

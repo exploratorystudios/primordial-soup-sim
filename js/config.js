@@ -84,6 +84,9 @@ export const CFG = {
   TOX: 0.05,
   DIV_COST: 0.06,
   MIN_DIV_AGE: 40,
+  // Kin recognition: predators spare their own species (many protists recognise kin by surface molecules) unless
+  // starving below this share of their energy capacity (cannibalism is mostly a starvation response). 0 = off.
+  KIN_SPARE: 0.2,
   PRED_P: 0.4,             // chance a hunt succeeds (was 0.25: predators stayed rare)
   ENDO_P: 0.05,
   // Endosymbiosis by partnership (closer to the leading hypothesis: an archaeal host and an aerobic bacterium
