@@ -183,6 +183,8 @@ function rewindFrame() {
     if (q && (q.t !== world.t || r.fresh)) w = rewind.coarse(k);
   } else if (r.fresh || world.t !== (smooth ? k + 1 : k)) w = rewind.exact(k, smooth);
   r.fresh = false;
+  const cur = ui.selected;
+  if (cur && cur.pan) r.spec.pan = { ...cur.pan }; // keep any panning done while rewinding
   if (w) swapWorld(w, r.spec);
   alpha = smooth ? Math.min(1, Math.max(0, r.t - k)) : 1;
   if (!smooth) r.t = Math.min(r.t, world.t); // (hopping between saves: carry on from where it landed)
@@ -483,6 +485,7 @@ function chase(sel, dt) {
   // well away from it, and everything stays still relative to it).
   renderer.cam.x = t.x + o.x + p.x;
   renderer.cam.y = t.y + o.y + p.y;
+  sel.camT = t; // where the camera put the subject this frame (drawn position, between ticks)
 }
 
 function kindOf(o) {
@@ -578,7 +581,10 @@ ui.onFollow = toggleFollow;
 function reframe() {
   const s = ui.selected;
   if (!s || s.gone || !s.follow) return;
-  const t = followTarget(s);
+  // Measure from where the camera last drew the subject, not where the simulation has it: at slow
+  // speeds those differ (the view is drawn between ticks), and mixing them made every mouse move
+  // nudge the view as well, as if something else were dragging it too.
+  const t = s.camT || followTarget(s);
   const o = s.offset || { x: 0, y: 0 };
   s.pan = { x: renderer.cam.x - t.x - o.x, y: renderer.cam.y - t.y - o.y, hold: true }; // stays where you put it
 }
