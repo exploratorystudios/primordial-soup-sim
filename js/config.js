@@ -11,7 +11,7 @@ export const CFG = {
   VENT_GLOW: 0.3,         // faint thermal light near vents (anoxygenic photosynthesis stepping stone)
   CHEM_DIFF: 0.25, CHEM_DECAY: 0.0015, CHEM_HALF: 4,
   ORG_DIFF: 0.15, ORG_DECAY: 0.0006,
-  OXY_DIFF: 0.3, OXY_DECAY: 0.0015, OXY_REACT: 0.01,
+  OXY_DIFF: 0.3, OXY_DECAY: 0.0005, // (was 0.0015: oxygen's half-life ~460 ticks, too short for it to build up) OXY_REACT: 0.01,
   NUT_INIT: 0.3,           // conserved limiting nutrient (think phosphate) per grid cell
   NUT_DIFF: 0.3, NUT_BURIAL: 0.0004,
   VENT_NUT: 0.1,          // minerals from vents
@@ -93,7 +93,7 @@ export const CFG = {
   // Multicellularity as on Earth: bacteria form colonies and simple multicellular organisms (no mouth or
   // germline cells: engulfing needs a eukaryotic cytoskeleton), so complex organisms are eukaryotic; and
   // bodies above O2_SIZE_MIN cells need oxygen, up to O2_SIZE_MAX cells when fully oxygenated.
-  REALISTIC_MULTI: false,
+  REALISTIC_MULTI: true,
   O2_SIZE_MIN: 16, O2_SIZE_MAX: 62,
   GENERALIST_BIAS: 0.2,
 
