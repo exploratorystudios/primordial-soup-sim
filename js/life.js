@@ -354,7 +354,7 @@ export class Life {
     const sp = this.species.get(c.species);
     if (!sp || Gn.distance(g, sp.rep) > CFG.SPECIATE) child.species = this.newSpecies(child, c.species).id;
     // Incomplete separation after division: the seed of multicellularity.
-    if (c.type !== T_GERM && c.orgSize < c.colMax && c.bonds.length < CFG.MAX_BONDS && rng.next() < c.adh) {
+    if (c.type !== T_GERM && c.orgSize < c.colMax && c.bonds.length < CFG.MAX_BONDS && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh) {
       link(c, child);
       child.org = c.org;
       child.orgSize = ++c.orgSize;
@@ -580,7 +580,7 @@ export class Life {
       org.x /= size; org.y /= size;
       let special = 0;
       for (let t = 1; t < 6; t++) if (org.types[t] > 0) special++;
-      if (size >= 16 && special >= 3 && org.types[T_GERM] > 0) org.kind = 'complex';
+      if (size >= 16 && special >= 3 && org.types[T_GERM] > 0 && (!CFG.REALISTIC_MULTI || root.mito)) org.kind = 'complex';
       else if (size >= 8 && special >= 2) org.kind = 'multicellular';
       orgs.push(org);
     }
@@ -588,11 +588,19 @@ export class Life {
     this.organisms = orgs;
   }
 
+  // Largest body oxygen allows here: diffusion supplies a big body's inner cells only when oxygen is plentiful.
+  bodyLimit(c) {
+    const F = this.w.fields, o2f = Math.min(1, F.get(F.oxygen, c.x, c.y) / CFG.O2_REF);
+    return CFG.O2_SIZE_MIN + (CFG.O2_SIZE_MAX - CFG.O2_SIZE_MIN) * o2f;
+  }
+
   differentiate(x, size, light) {
     const g = x.g;
+    const prok = CFG.REALISTIC_MULTI && !x.mito; // bacteria: no mouth (phagocytosis) or germline cells
     const i1 = x.bonds.length / 4, i2 = Math.min(1, x.depth / 6), i3 = Math.min(1, size / 30);
     let best = 0, bs = -1e9;
     for (let t = 0; t < Gn.NTYPES; t++) {
+      if (prok && (t === T_MOUTH || t === T_GERM)) continue;
       const o = Gn.DIFF + t * Gn.NDIFF_IN;
       let s = g[o] + g[o + 1] * i1 + g[o + 2] * i2 + g[o + 3] * i3 + g[o + 4] * light;
       if (t === 0) s += CFG.GENERALIST_BIAS;

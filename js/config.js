@@ -85,6 +85,11 @@ export const CFG = {
   BOND_BREAK: 0.00015,
   SHARE_K: 0.1,
   MAX_BONDS: 5,
+  // Multicellularity as on Earth: bacteria form colonies and simple multicellular organisms (no mouth or
+  // germline cells: engulfing needs a eukaryotic cytoskeleton), so complex organisms are eukaryotic; and
+  // bodies above O2_SIZE_MIN cells need oxygen, up to O2_SIZE_MAX cells when fully oxygenated.
+  REALISTIC_MULTI: false,
+  O2_SIZE_MIN: 16, O2_SIZE_MAX: 62,
   GENERALIST_BIAS: 0.2,
 
   // Major transitions

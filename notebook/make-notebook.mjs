@@ -66,19 +66,22 @@ cells again and it carries on where it left off. Change \`RUN_TAG\` to start a f
 # ---- Experiment settings -------------------------------------------------------------------------
 # Each entry is a set of overrides for js/config.js (CFG). The first one is the baseline.
 CONFIGS = {
-    # Oxygen breaks down fast (OXY_DECAY 0.0015: ~460-tick half-life), so patchy photosynthesis rarely keeps it up.
-    # In run sun2, 3x longer-lived oxygen raised the Great Oxidation from 23% to 56% of worlds (shorter days did
-    # not help). Confirm, and check the dose: does 2x give most of the gain without the dip in complex life?
-    "baseline": {},
-    "o2_x2":    {"OXY_DECAY": 0.00075},   # ~900-tick half-life
-    "o2_x3":    {"OXY_DECAY": 0.0005},    # ~1,400-tick half-life (sun2's slow_o2)
+    # 1) Longer-lived oxygen (OXY_DECAY 0.0005, ~3x the half-life) doubled the Great Oxidation and eukaryotes in
+    #    earlier runs, but on reused seeds: this run uses fresh ones (FIRST_SEED below).
+    # 2) REALISTIC_MULTI, multicellularity as on Earth: bacteria still make colonies and simple multicellular
+    #    organisms (no mouth or germline cells), complex organisms are eukaryotic, and bodies above 16 cells
+    #    need local oxygen (up to 62 cells when fully oxygenated).
+    "baseline":   {},
+    "o2_x3":      {"OXY_DECAY": 0.0005},
+    "o2_x3_real": {"OXY_DECAY": 0.0005, "REALISTIC_MULTI": True},
+    "o2_x2_real": {"OXY_DECAY": 0.00075, "REALISTIC_MULTI": True},
 }
 TICKS = 70_000            # simulated ticks per world (late stages typically arrive at 40k-70k)
 SEEDS_PER_CONFIG = None   # None: chosen from the number of cores (one or two full waves)
 FIRST_SEED = 1001          # use a fresh range for each new experiment: runs are deterministic, so reused seeds
                            # replay the same worlds (seeds 1-54 were used by pool4, sun2 and o2a)
 WORKERS = None            # None: as many as the cores and memory allow
-RUN_TAG = "o2b"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
+RUN_TAG = "real1"         # results go to primordial-soup-runs/results-<RUN_TAG>.jsonl
 `),
   code(`
 # ---- Environment: cores, memory, Python packages, Node.js -----------------------------------------
