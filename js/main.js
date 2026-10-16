@@ -16,9 +16,8 @@ const SPEEDS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 250]
 const $ = (id) => document.getElementById(id);
 
 const canvas = $('world');
-// ?gl=1 draws small cells on the GPU (glcells.js). Off by default: it halves drawing time, but in Chrome on Linux
-// with a software 2D canvas the WebGL layer made the page stall for about a second at a time at high speeds.
-const renderer = new Renderer(canvas, { gl: new URLSearchParams(location.search).get('gl') === '1' });
+// Small cells are drawn on the GPU (glcells.js), about half the drawing time; ?gl=0 draws everything in 2D.
+const renderer = new Renderer(canvas, { gl: new URLSearchParams(location.search).get('gl') !== '0' });
 const ui = new UI();
 const opts = { colorMode: 'troph', overlay: 'none', showChem: true, selected: null, flash: null };
 
@@ -80,8 +79,11 @@ function speedLabel() {
   el.title = s === Infinity ? `As fast as possible: ≈${rate} ticks per second` : s < 1 ? `One tick every ${Math.round(1 / s)} frames` : `${s} ticks per frame${capped ? `; the CPU manages ≈${rate} ticks per second` : ''}`;
 }
 // ?speed= in ticks per frame (0.01 … 250, or max).
-function setMax(on) { maxOn = on; speedLabel(); }
-if (params.get('speed') === 'max') { maxOn = true; setSpeed(speedIdx); }
+// Max (run as fast as the CPU allows, in long frames) is off: long frames made the GPU layer stall the page.
+// ?speed=max and M give the slider's top speed instead; the server's admins keep their Max (it sets the server).
+function setMax() { maxOn = false; setSpeed(SPEEDS.length - 1); }
+$('btn-max').style.display = 'none';
+if (params.get('speed') === 'max') setMax();
 else setSpeed(params.has('speed') ? speedIndexOf(+params.get('speed') || SPEEDS[0]) : speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
 function showCfgNote(from) {
@@ -434,7 +436,7 @@ window.addEventListener('keydown', (e) => {
   else if (story.active && e.key === 'ArrowRight') { e.preventDefault(); $('st-fwd').click(); }
   else if (e.key === '+' || e.key === '=') { maxOn = false; setSpeed(speedIdx + 1); }
   else if (e.key === '-') { maxOn = false; setSpeed(speedIdx - 1); }
-  else if (e.key === 'm' || e.key === 'M') setMax(!maxOn);
+  else if (e.key === 'm' || e.key === 'M') setMax();
   else if (e.key === 'r' || e.key === 'R') $('btn-rew').click();
 });
 
