@@ -25,6 +25,7 @@ export class LiveFeed {
     this.seq = -1;
     this.tps = 0;                     // the server's ticks per second
     this._t = null;
+    this.seed = null;               // the world the frames should belong to
   }
 
   // The server's whole world, with its settings.
@@ -37,15 +38,18 @@ export class LiveFeed {
     w.smooth = true;
     w.soupAlpha = (a) => a; // (molecules glide between frames like everything else)
     this.lastFull = performance.now();
+    this.seed = w.seed; this._t = w.t;
     return w;
   }
 
-  // Update the world from the latest frame. Returns false if there was nothing new.
+  // Update the world from the latest frame. Returns false if there was nothing new, and 'reset' if the frame is
+  // from a different world (the server started a new one): then the page loads it with full().
   async frame(w) {
     const r = await fetch('/api/frame', { cache: 'no-store' });
     if (!r.ok) return false;
     const f = await r.json();
     if (f.seq === this.seq) return false;
+    if (this.seed !== null && (f.seed !== this.seed || f.t < this._t)) return 'reset';
     const now = performance.now();
     if (this._t !== null && f.t > this._t) {
       const gap = now - this.arrived;

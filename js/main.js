@@ -391,9 +391,14 @@ $('btn-max').onclick = () => setMax(!maxOn);
 const randomSeed = () => Math.floor(Math.random() * 1e6) + 1;
 $('btn-new').onclick = () => {
   const typed = Math.floor(+$('seed').value);
-  newWorld(typed >= 1 && typed !== seed ? typed : randomSeed());
+  const s = typed >= 1 && typed !== seed ? typed : randomSeed();
+  if (live) liveNewWorld(s); else newWorld(s);
 };
-$('seed').onkeydown = (e) => { if (e.key === 'Enter') newWorld(Math.max(1, Math.floor(+$('seed').value) || 1)); };
+$('seed').onkeydown = (e) => {
+  if (e.key !== 'Enter') return;
+  const s = Math.max(1, Math.floor(+$('seed').value) || 1);
+  if (live) liveNewWorld(s); else newWorld(s);
+};
 $('color-mode').onchange = (e) => { opts.colorMode = e.target.value; };
 $('overlay').onchange = (e) => { opts.overlay = e.target.value; };
 $('show-chem').onchange = (e) => { opts.showChem = e.target.checked; };
@@ -681,15 +686,17 @@ async function startLive() {
   // The server runs the clock: no play, speed, rewind, new worlds, tour or planetary events here.
   const hide = (el) => { el.style.display = 'none'; };
   for (const id of ['btn-play', 'btn-rew', 'btn-step', 'btn-seek', 'btn-tour', 'btn-load', 'speed', 'btn-max']) hide($(id));
-  hide($('seed').closest('.row'));
   hide($('ev-meteor').closest('section'));
   $('btn-save').title = 'Download the server\'s world as it is now (load it in a local copy to explore it at your own pace)';
+  $('btn-new').title = 'Restart the server\'s world (everyone watching sees it): needs the server\'s admin key. The old world is archived on the server.';
+  $('seed').value = w.seed;
   world = w; seed = w.seed;
   ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null;
   const note = document.createElement('p');
   note.className = 'cfg-note';
-  note.textContent = `Live: you're watching a world that runs on the server (seed ${w.seed}). It keeps evolving when nobody is watching.`;
+  note.id = 'live-note';
   $('scale-note').after(note);
+  liveNote();
   await feed.frame(world).catch(() => {});
   speedLabel();
   // About once a second a new frame; now and then a full snapshot (genomes of cells born meanwhile).
@@ -697,9 +704,35 @@ async function startLive() {
     const t0 = performance.now();
     try {
       if (t0 - feed.lastFull > FULL_EVERY) swapWorld(await feed.full(), selSpec(ui.selected));
-      await feed.frame(world);
+      if ((await feed.frame(world)) === 'reset') liveReset(await feed.full()); // (the server started a new world)
     } catch { /* the server may be restarting: try again shortly */ }
     setTimeout(pump, Math.max(200, 1000 - (performance.now() - t0)));
   };
   setTimeout(pump, 1000);
+}
+function liveNote() { $('live-note').textContent = `Live: you're watching a world that runs on the server (seed ${world.seed}). It keeps evolving when nobody is watching.`; }
+function liveReset(w) {
+  swapWorld(w, null);
+  seed = w.seed; $('seed').value = seed;
+  liveNote();
+}
+
+// New world on the server: everyone watching gets it, so it needs the admin key (ADMIN_KEY on the server),
+// asked for once and remembered in this browser.
+const KEY_STORE = 'primordial-soup-admin-key';
+async function liveNewWorld(s) {
+  let key = null;
+  try { key = localStorage.getItem(KEY_STORE); } catch { /* storage may be unavailable */ }
+  if (!key) key = prompt(`Restart the server's world as seed ${s}? Everyone watching will see the new one (the old one is archived on the server).\n\nAdmin key (ADMIN_KEY on the server):`);
+  if (!key) return;
+  let r = null;
+  try { r = await fetch('/api/new-world', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }, body: JSON.stringify({ seed: s }) }); } catch { /* unreachable */ }
+  if (!r || !r.ok) {
+    if (r && r.status === 403) { try { localStorage.removeItem(KEY_STORE); } catch { /* ignore */ } }
+    ui.toast(`New world refused: ${r ? await r.text() : 'the server could not be reached'}`, world.t);
+    return;
+  }
+  try { localStorage.setItem(KEY_STORE, key); } catch { /* ignore */ }
+  liveReset(await live.full());
+  ui.toast(`New world on the server: seed ${seed}`, world.t);
 }
