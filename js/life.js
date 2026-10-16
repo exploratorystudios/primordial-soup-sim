@@ -837,6 +837,23 @@ export class Life {
         org.x += x.x; org.y += x.y;
       }
       org.x /= size; org.y /= size;
+      // Larger eukaryotic bodies set a germline aside (GERM_SETASIDE) if none of their cells chose it.
+      if (CFG.GERM_SETASIDE > 0 && !keep && root.mito && size >= CFG.GERM_SETASIDE && org.types[T_GERM] === 0) {
+        const o = Gn.DIFF + T_GERM * Gn.NDIFF_IN;
+        let best = null, bs = -0.5;
+        for (const x of comp) {
+          if (!x.mito) continue;
+          const g = x.g, light = w.lightAt(x.x, x.y);
+          const s = g[o] + g[o + 1] * (x.bonds.length / 4) + g[o + 2] * Math.min(1, x.depth / 6) + g[o + 3] * Math.min(1, size / 30) + g[o + 4] * light;
+          if (s > bs || (best && s === bs && x.bonds.length > best.bonds.length)) { bs = s; best = x; }
+        }
+        if (best) {
+          org.types[best.type]--; org.types[T_GERM]++;
+          best.type = T_GERM;
+          best.gf = 1 + CFG.SPEC_BONUS * Math.min(1, (size - 1) / 15);
+          best.sv++;
+        }
+      }
       let special = 0;
       for (let t = 1; t < 6; t++) if (org.types[t] > 0) special++;
       if (size >= 16 && special >= 3 && org.types[T_GERM] > 0 && (!CFG.REALISTIC_MULTI || root.mito)) org.kind = 'complex';

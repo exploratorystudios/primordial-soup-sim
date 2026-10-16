@@ -94,6 +94,9 @@ export const CFG = {
                            // and flatworm paratomy, Volvox daughter colonies). Takes the place of FRAGMENT.
   PARATOMY_EUK: true,      // with PARATOMY, eukaryotic colonies reproduce by paratomy too; false = bacteria only, as in
                            // nature (filamentous bacteria fragment; complex eukaryotes go through a spore or egg)
+  GERM_SETASIDE: 0,        // eukaryotic colonies of at least this many cells with no germline set one cell aside as
+                           // germline (the one whose fate genes lean most toward it, unless they are strongly against:
+                           // score below -0.5), as germ/body splits appear with size in Volvox and its relatives. 0 = off
   GERM_MUT: 1,             // mutation rate of a germline cell's offspring, as a fraction of normal: germ cells divide
                            // rarely and are kept from damage (the Weismann barrier), so their offspring start cleaner
   PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway
