@@ -591,8 +591,23 @@ export class Life {
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
     if (!eaten) {
       const F = this.w.fields;
-      F.add(F.organic, c.x, c.y, (Math.max(0, c.energy) * 0.5 + c.m * 8) * CFG.DEATH_ORG);
-      F.add(F.nutrient, c.x, c.y, c.nut);
+      let nut = c.nut, en = Math.max(0, c.energy) * 0.5;
+      // Recycling (RECYCLE): a colony's living neighbours take up the dying cell's material and energy.
+      if (CFG.RECYCLE && c.bonds.length) {
+        let n = 0;
+        for (const o of c.bonds) if (!o.dead) n++;
+        if (n) {
+          for (const o of c.bonds) {
+            if (o.dead) continue;
+            o.energy = Math.min(o.cap, o.energy + en / n);
+            o.nut += nut / n;
+            if (o.nut > o.nutNeed) { F.add(F.nutrient, o.x, o.y, o.nut - o.nutNeed); o.nut = o.nutNeed; }
+          }
+          nut = 0; en = 0;
+        }
+      }
+      F.add(F.organic, c.x, c.y, (en + c.m * 8) * CFG.DEATH_ORG);
+      F.add(F.nutrient, c.x, c.y, nut);
       c.nut = 0;
     }
     const nb = c.bonds.slice();

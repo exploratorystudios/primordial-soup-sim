@@ -140,6 +140,9 @@ export const CFG = {
   SPECIATE: 0.07,
   DAMP: 0.82,
   BOND_BREAK: 0.00015,
+  RECYCLE: false,          // a colony cell that dies (not eaten) passes its nutrient (its body material) and half its
+                           // energy to its bonded neighbours instead of the water (apoptosis: neighbours reuse dying cells),
+                           // so they can divide to replace it and bodies persist through cell turnover
   JUNCTIONS: false,        // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
                            // and hold tissue): stronger bonds break less at random, stretch up to twice as far and pull
                            // back harder, and when a cell dies its neighbours re-bond (heal) with that chance
