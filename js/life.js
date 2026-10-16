@@ -118,6 +118,7 @@ export class Life {
     this.cells = [];
     this.newborns = [];
     this.orgWeak = new Map(); // CULL_FAIR: each colony's summed weakness and cell count this tick
+    this.pushPool = new Map(); // TISSUE_PUSH: each colony's shared push this pass
     this.swim = new Map(); // COLONY_SWIM: each colony's thrust and mass this tick
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
@@ -637,14 +638,9 @@ export class Life {
   // (computed in parallel, then applied together); touching pairs from different organisms then get their
   // chance to eat, exchange genes or merge, one pair at a time in a fixed order.
   interact() {
-    const cells = this.cells, n = cells.length, V = this.V;
+    const V = this.V;
     const R = this.runPhase(V, 'contact'); // (positions, sizes and deaths in V are current: each change wrote there)
-    for (let k = 0; k < n; k++) {
-      const c = cells[k];
-      if (c.dead) continue;
-      const s = c.slot;
-      c.x += R.PUSHX[s]; c.y += R.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
-    }
+    this.applyPushes(R);
     const chunks = R.P[K.P_CHUNKS], seg = R.P[K.P_SEGCAP], slotCell = this.slotCell;
     for (let ch = 0; ch < chunks; ch++) {
       for (let q = ch * seg, qe = q + R.EVN[ch]; q < qe; q += 3) {
@@ -660,13 +656,40 @@ export class Life {
   // A colony behaves like one big body for engulfment purposes.
   // Extra position-only pass so densely packed cells don't interpenetrate (visible at true scale).
   relax() {
-    const cells = this.cells, n = cells.length, V = this.V;
+    const V = this.V;
     this.runPhase(V, 'relax');
+    this.applyPushes(V);
+  }
+
+  // Move every cell out of the cells it overlaps. With TISSUE_PUSH, the push a colony cell gets from other
+  // organisms is shared by its whole colony (by size, like one body): the cell keeps 1 - its adhesion of it.
+  applyPushes(R) {
+    const cells = this.cells, n = cells.length, V = this.V, pool = this.pushPool;
+    const share = (c) => (CFG.TISSUE_PUSH && c.orgSize > 1 && c.bonds.length ? (CFG.JUNCTIONS ? Math.min(1, c.adh) : 1) : 0);
+    if (CFG.TISSUE_PUSH) {
+      pool.clear();
+      for (let k = 0; k < n; k++) {
+        const c = cells[k], f = c.dead ? 0 : share(c);
+        if (!f) continue;
+        const s = c.slot;
+        let p = pool.get(c.org);
+        if (!p) { p = { x: 0, y: 0, a: 0 }; pool.set(c.org, p); }
+        p.x += R.FPUSHX[s] * f * c.area; p.y += R.FPUSHY[s] * f * c.area;
+      }
+      for (let k = 0; k < n; k++) { const c = cells[k]; if (!c.dead && c.orgSize > 1 && c.bonds.length) { const p = pool.get(c.org); if (p) p.a += c.area; } }
+    }
     for (let k = 0; k < n; k++) {
       const c = cells[k];
       if (c.dead) continue;
       const s = c.slot;
-      c.x += V.PUSHX[s]; c.y += V.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
+      let px = R.PUSHX[s], py = R.PUSHY[s];
+      const f = share(c);
+      if (f) {
+        px -= R.FPUSHX[s] * f; py -= R.FPUSHY[s] * f;
+        const p = pool.get(c.org);
+        if (p && p.a > 0) { px += p.x / p.a; py += p.y / p.a; }
+      }
+      c.x += px; c.y += py; V.X[s] = c.x; V.Y[s] = c.y;
     }
   }
 

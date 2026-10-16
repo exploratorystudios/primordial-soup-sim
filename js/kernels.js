@@ -52,7 +52,7 @@ export function makeViews(cap, vcap, nc, fn, sunLen, chunks, shared) {
     HEAD: f64(cap), PX: f64(cap), PY: f64(cap), FX: f64(cap), FY: f64(cap),
     // outputs
     OUTF: u8(cap), HEADOUT: f64(cap), DIRX: f64(cap), DIRY: f64(cap), FI: i32(cap), DCHEM: f64(cap), DORG: f64(cap),
-    DNUT: f64(cap), O2ADD: f64(cap), NETB: f64(cap), HF: f64(cap), DE: f64(cap), GNUT: f64(cap), PUSHX: f64(cap), PUSHY: f64(cap),
+    DNUT: f64(cap), O2ADD: f64(cap), NETB: f64(cap), HF: f64(cap), DE: f64(cap), GNUT: f64(cap), PUSHX: f64(cap), PUSHY: f64(cap), FPUSHX: f64(cap), FPUSHY: f64(cap),
     // grids and fields
     HSTART: i32(nc + 1), HITEMS: i32(cap), PSTART: i32(nc + 1), PITEMS: i32(cap), PIDX: i32(cap), COV: f32(nc),
     FSTART: i32(fn + 1), FITEMS: i32(cap), CURX: f32(fn), CURY: f32(fn), FCHEM: f32(fn), FORG: f32(fn), FOXY: f32(fn), FNUT: f32(fn), SUN: f32(sunLen),
@@ -240,14 +240,14 @@ export function shareKernel(V, q0, q1) {
 // happen: one could eat the other, they could merge (symbiosis), or genes pass between them (decided here,
 // from the pair's own random stream). Entries are (slot a, slot b, gene transfer?), a before b in order.
 export function contactKernel(V, k0, k1, relax, chunk) {
-  const P = V.P, maxR = P[P_MAXR], gw = P[P_HGW], { ORDER, RANK, X, Y, R, AREA, ORG, FLAGS, ID, HSTART, HITEMS, PUSHX, PUSHY, EV } = V;
+  const P = V.P, maxR = P[P_MAXR], gw = P[P_HGW], { ORDER, RANK, X, Y, R, AREA, ORG, FLAGS, ID, HSTART, HITEMS, PUSHX, PUSHY, FPUSHX, FPUSHY, EV } = V;
   const seed = P[P_SEED], t = P[P_T], hgtP = P[P_HGT], symb = P[P_SYMB] !== 0;
   const bx = [0, 0, 0, 0], segCap = P[P_SEGCAP], base = chunk * segCap;
   let ne = 0, overflow = false;
   for (let k = k0; k < k1; k++) {
     const i = ORDER[k];
-    let pushx = 0, pushy = 0;
-    if (FLAGS[i] & F_DEAD) { PUSHX[i] = 0; PUSHY[i] = 0; continue; }
+    let pushx = 0, pushy = 0, fpx = 0, fpy = 0; // (fp: the part from other organisms)
+    if (FLAGS[i] & F_DEAD) { PUSHX[i] = 0; PUSHY[i] = 0; FPUSHX[i] = 0; FPUSHY[i] = 0; continue; }
     const ax = X[i], ay = Y[i], ar = R[i], aarea = AREA[i], org = ORG[i];
     box(P, ax, ay, ar + maxR, bx);
     for (let cy = bx[2]; cy <= bx[3]; cy++) {
@@ -260,7 +260,9 @@ export function contactKernel(V, k0, k1, relax, chunk) {
           if (d2 >= rr * rr) continue;
           const d = Math.sqrt(d2) || 0.01, s = aarea + AREA[j];
           const ov = (rr - d) * (relax ? 0.7 : 0.8); // membranes barely interpenetrate
-          pushx -= (dx / d) * ov * (AREA[j] / s); pushy -= (dy / d) * ov * (AREA[j] / s);
+          const px = (dx / d) * ov * (AREA[j] / s), py = (dy / d) * ov * (AREA[j] / s);
+          pushx -= px; pushy -= py;
+          if (ORG[j] !== org) { fpx -= px; fpy -= py; }
           if (!relax && RANK[j] > k && ORG[j] !== org) {
             const fi = FLAGS[i], fj = FLAGS[j];
             const hgt = hrand(seed, t, Math.imul(ID[i], 73856093) ^ Math.imul(ID[j], 19349663)) < hgtP ? 1 : 0;
@@ -274,7 +276,7 @@ export function contactKernel(V, k0, k1, relax, chunk) {
         }
       }
     }
-    PUSHX[i] = pushx; PUSHY[i] = pushy;
+    PUSHX[i] = pushx; PUSHY[i] = pushy; FPUSHX[i] = fpx; FPUSHY[i] = fpy;
   }
   if (!relax) V.EVN[chunk] = overflow ? -1 : ne;
 }

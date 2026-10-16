@@ -150,6 +150,9 @@ export const CFG = {
   // them: free-living cells starved and no eukaryotes arose.
   RECYCLE_PROK: 0.25,
   RECYCLE_EUK: 0.9,
+  TISSUE_PUSH: true,       // a bump from outside a colony is spread through it (junctions and matrix carry it), like hitting
+                           // one body: each cell keeps 1 - adhesion of it and the rest moves the whole colony. Before, only
+                           // the struck cell moved and its bonds stretched until they snapped
   JUNCTIONS: true,         // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
                            // and hold tissue): stronger bonds break less at random, stretch up to twice as far and pull
                            // back harder, and when a cell dies its neighbours re-bond (heal) with that chance
