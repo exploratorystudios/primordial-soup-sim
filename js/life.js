@@ -42,6 +42,7 @@ export class Cell {
     this.org = this.id; this.orgSize = 1; this.depth = 0;
     this.up = 0; // MORPH: the colony cell this one grew from (its body-plan 'parent' bond)
     this.germKept = false; // GERM_KEEP: set aside as germline, for good
+    this.fated = false; // FATE_COMMIT: has chosen its own job as a colony cell (newborns choose freely first)
     this.gf = 1; // TRADEOFF / SPEC_BONUS: this colony cell's strength at its jobs
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
@@ -841,7 +842,7 @@ export class Life {
     for (const c of cells) {
       if (c.dead || c._s === stamp) continue;
       c._s = stamp;
-      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; c.germKept = false; if (c.gf !== 1) { c.gf = 1; c.sv++; } if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
+      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; c.germKept = false; c.fated = false; if (c.gf !== 1) { c.gf = 1; c.sv++; } if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
       q.length = 0; q.push(c);
       let root = c;
       for (let k = 0; k < q.length; k++) {
@@ -887,6 +888,7 @@ export class Life {
         x.org = root.id;
         x.orgSize = size;
         const nt = keep || (CFG.GERM_KEEP && x.germKept && x.type === T_GERM) ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
+        if (!keep) x.fated = true;
         if (nt !== x.type) { x.type = nt; x.sv++; }
         // Doing every job at once costs a colony's generalists more the bigger it is (TRADEOFF), and its
         // specialists get better at their one job (SPEC_BONUS).
@@ -986,7 +988,8 @@ export class Life {
       if (s > bs) { bs = s; best = t; }
     }
     // Commitment: switching jobs needs a clear reason, not a small nudge in its cues.
-    if (best !== x.type && cur > -1e9 && bs < cur + CFG.FATE_COMMIT) return x.type;
+    // (A newborn chooses freely first: it inherited its parent's job, not one fitted to its own place.)
+    if (x.fated && best !== x.type && cur > -1e9 && bs < cur + CFG.FATE_COMMIT) return x.type;
     return best;
   }
 
