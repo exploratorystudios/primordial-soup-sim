@@ -115,6 +115,14 @@ export const CFG = {
                            // each new colony cell attaches, and angle springs hold the shape, so offspring regrow their
                            // parent's form (or a mutated one). Filaments grow by inserting cells along their length.
   MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
+  MORPH_BRANCH_INIT: 0.5,  // founders' branching gene starts in [0, this): 1 + gene x 4 daughters per cell
+  DEVPLAN: false,          // developmental body plans, in place of MORPH's branching trees: each division turns its plane
+                           // by a gene (0 = filament, 90° = sheet), with gene-set noise; growth at the tips only or
+                           // everywhere; cells beyond a gene-set radius from the body's centre stop dividing (discs);
+                           // colony cells bond to every colony-mate they touch (neighbour adhesion)
+  NEIGHBOR_BOND: false,    // touching cells of the same colony bond to each other too (adhesion to all neighbours, as in
+                           // tissues), so bodies can close into sheets and clumps instead of only branching trees
+  NEIGHBOR_P: 0.2,         // chance per 10 ticks a touching pair bonds, times their junction strength
   CULL_FAIR: true,         // the crowding cull judges a colony cell by its colony's average weakness, not its own
                            // (colony cells share energy, so one alone can look weak while its colony is healthy)
   GERM_STEM: true,         // germline stem cells: a ready germ cell stays in the body and releases its daughter as the

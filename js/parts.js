@@ -670,7 +670,7 @@ function geneGroups(c, parent) {
     ['Metabolism & body genes', [Gn.SIZE, Gn.PHOTO, Gn.CHEMO, Gn.HETERO, Gn.PRED, Gn.AEROBIC, Gn.ARMOR, Gn.LIFESPAN, Gn.DIVTH, Gn.MUTR, Gn.HUE]],
     ['Behaviour genes', [Gn.MOTIL, Gn.W_LIGHT, Gn.W_CHEM, Gn.W_ORG, Gn.W_OXY, Gn.W_PREY, Gn.W_FLEE]],
     ['Multicellularity genes', [Gn.ADHES, Gn.SHARE, Gn.COLMAX]],
-    ['Body-plan genes', [Gn.M_ANGLE, Gn.M_SPREAD, Gn.M_BRANCH, Gn.M_SIDE]],
+    ['Body-plan genes', [Gn.M_ANGLE, Gn.M_SPREAD, Gn.M_BRANCH, Gn.M_SIDE, Gn.M_LATERAL]],
   ];
   const out = groups.map(([name, idx]) => {
     const g = part(name, parent.obj, { title: name, kv: [['Genes', String(idx.length)]], desc: 'Click a gene to see its value and what it does.' }, { parent, note: String(idx.length) });
@@ -689,7 +689,7 @@ function geneGroups(c, parent) {
 
 function gene(c, i, parent, name) {
   const v = c.g[i];
-  const label = name || Gn.GENE_NAMES[i] || Gn.MORPH_NAMES[i - Gn.NG];
+  const label = name || Gn.GENE_NAMES[i] || Gn.morphName(i);
   return part(label, parent.obj, {
     title: `Gene: ${label}`,
     kv: [['Value', v.toFixed(3)], ['Range', i >= Gn.FIRST_SIGNED && i < Gn.NG ? '−1 … 1' : '0 … 1'], ['Locus', `#${i}`]],

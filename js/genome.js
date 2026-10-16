@@ -20,20 +20,28 @@ export const NG = DIFF + NTYPES * NDIFF_IN;
 // Angle: how far each new cell turns from its parent's direction (straight = filament). Spread: how far apart a
 // cell's branches fan out. Branching: how many daughters a cell holds (1 = unbranched, up to 4). Alternate:
 // above 0.5 the turns alternate side by side and generation (zigzags, opposite branches) instead of curling.
-export const M_ANGLE = NG, M_SPREAD = NG + 1, M_BRANCH = NG + 2, M_SIDE = NG + 3, NGT = NG + 4;
-export const MORPH_NAMES = ['Growth angle', 'Branch spread', 'Branching', 'Alternate sides'];
+export const M_ANGLE = NG, M_SPREAD = NG + 1, M_BRANCH = NG + 2, M_SIDE = NG + 3, NGB = NG + 4;
+// DEVPLAN's fifth: side adhesion, how readily a cell bonds to touching colony-mates other than its mother and daughters.
+export const M_LATERAL = NG + 4, NGT = NG + 5;
+export const MORPH_NAMES = ['Growth angle', 'Branch spread', 'Branching', 'Alternate sides', 'Side adhesion'];
+// With CFG.DEVPLAN the same four genes run a developmental program instead.
+export const DEV_NAMES = ['Division-plane turn', 'Division-plane noise', 'Tip growth', 'Growth radius', 'Side adhesion'];
+export const morphName = (i) => (CFG.DEVPLAN ? DEV_NAMES : MORPH_NAMES)[i - NG];
 
 // Starting body-plan genes, from their own random stream (so the rest of the genome is drawn as before).
 export function morphInit(g, seed) {
   const r = new RNG((seed ^ 0x5bd1e995) >>> 0);
-  g[M_ANGLE] = r.next() * 0.3; g[M_SPREAD] = r.next(); g[M_BRANCH] = r.next() * 0.5; g[M_SIDE] = r.next();
+  if (CFG.DEVPLAN) { g[M_ANGLE] = r.next(); g[M_SPREAD] = r.next() * 0.3; g[M_BRANCH] = r.next(); g[M_SIDE] = r.next(); g[M_LATERAL] = r.next(); return g; }
+  g[M_ANGLE] = r.next() * 0.3; g[M_SPREAD] = r.next(); g[M_BRANCH] = r.next() * CFG.MORPH_BRANCH_INIT; g[M_SIDE] = r.next(); g[M_LATERAL] = r.next();
   return g;
 }
 // A genome saved before the body-plan genes existed, given some.
 export function fitGenome(g, seed) {
   if (g.length >= NGT) return g;
-  const x = new Float32Array(NGT); x.set(g);
-  return morphInit(x, seed);
+  const x = new Float32Array(NGT), fresh = morphInit(new Float32Array(NGT), seed);
+  x.set(g);
+  for (let i = g.length; i < NGT; i++) x[i] = fresh[i]; // (only the genes it didn't have)
+  return x;
 }
 
 export const GENE_NAMES = [
@@ -90,8 +98,9 @@ export function mutate(p, rng, rateMul = 1) {
     const lo = i >= FIRST_SIGNED ? -1 : 0;
     if (g[i] < lo) g[i] = lo; else if (g[i] > 1) g[i] = 1;
   }
-  if (CFG.MORPH) {
-    for (let i = NG; i < g.length; i++) {
+  // (Body-plan genes: MORPH's four, and with DEVPLAN side adhesion too.)
+  if (CFG.MORPH || CFG.DEVPLAN) {
+    for (let i = NG, end = CFG.DEVPLAN ? g.length : Math.min(g.length, NGB); i < end; i++) {
       if (rng.next() >= rate) continue;
       if (rng.next() < 0.04) g[i] = rng.next(); else g[i] += rng.gauss() * 0.1;
       if (g[i] < 0) g[i] = 0; else if (g[i] > 1) g[i] = 1;
@@ -105,7 +114,8 @@ export function mutate(p, rng, rateMul = 1) {
 // Sexual reproduction: each gene comes from one parent or the other (free recombination).
 export function recombine(a, b, rng) {
   const g = new Float32Array(a);
-  for (let i = 0, n = CFG.MORPH ? Math.min(a.length, b.length) : NG; i < n; i++) g[i] = rng.next() < 0.5 ? a[i] : b[i];
+  const m = Math.min(a.length, b.length);
+  for (let i = 0, n = CFG.DEVPLAN ? m : CFG.MORPH ? Math.min(m, NGB) : NG; i < n; i++) g[i] = rng.next() < 0.5 ? a[i] : b[i];
   return g;
 }
 
@@ -116,7 +126,8 @@ export function distance(a, b) {
     const d = Math.abs(a[i] - b[i]);
     s += i >= FIRST_SIGNED ? d * 0.5 : d;
   }
-  if (!CFG.MORPH) return s / (NG - 1);
-  for (let i = NG; i < NGT; i++) s += Math.abs(a[i] - b[i]);
-  return s / (NGT - 1);
+  if (!CFG.MORPH && !CFG.DEVPLAN) return s / (NG - 1);
+  const end = CFG.DEVPLAN ? NGT : NGB;
+  for (let i = NG; i < end; i++) s += Math.abs(a[i] - b[i]);
+  return s / (end - 1);
 }

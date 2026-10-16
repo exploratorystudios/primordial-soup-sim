@@ -48,6 +48,9 @@ export class Cell {
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
     this.heading = (id * 2.399) % 6.283;
+    // DEVPLAN: the direction a founder grows along, this cell's division axis relative to its mother's, and its distance
+    // from its body's centre (in cell radii).
+    this.axis = parent ? parent.axis : this.heading; this.rel = 0; this.orad = 0;
     this.px = 0; this.py = 0; this.fx = 0; this.fy = 0;
     this._s = 0; this._ds = 0;
     this.nut = 0;
@@ -343,7 +346,7 @@ export class Life {
       if (fromOrganism && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell buds off to found the next generation of a multicellular organism', c);
     }
 
-    if (c.energy > c.cap * c.divFrac && c.nut >= c.nutNeed && c.age > CFG.MIN_DIV_AGE && this.cells.length + this.newborns.length < CFG.MAX_CELLS) {
+    if (c.energy > c.cap * c.divFrac && c.nut >= c.nutNeed && c.age > CFG.MIN_DIV_AGE && this.cells.length + this.newborns.length < CFG.MAX_CELLS && (!CFG.DEVPLAN || this.growthZone(c))) {
       this.divide(c);
     }
     // A new eukaryote grows into its full size gradually (~0.02 µm per tick).
@@ -361,6 +364,70 @@ export class Life {
     for (const o of c.bonds) if (o.id === c.up) return o;
     return null;
   }
+  // With NEIGHBOR_BOND a cell's bonds include neighbours, which the body plan ignores: its daughters are the cells
+  // that grew from it. (Without it every bond but the one to its own parent is a daughter, as before.)
+  isDaughter(c, o) { return !(CFG.NEIGHBOR_BOND || CFG.DEVPLAN) || o.up === c.id; }
+  firstDaughter(c) { for (const o of c.bonds) if (this.isDaughter(c, o)) return o; return null; }
+  // Neighbour adhesion (NEIGHBOR_BOND): touching cells of one colony bond, each pair with a chance per check set by
+  // their junction strength, while both have room (MAX_BONDS).
+  neighbourBonds(comp) {
+    const rng = this.w.rng, P = CFG.NEIGHBOR_P;
+    for (let i = 0; i < comp.length; i++) {
+      const a = comp[i];
+      if (a.bonds.length >= CFG.MAX_BONDS) continue;
+      for (let j = i + 1; j < comp.length; j++) {
+        const b = comp[j];
+        if (b.bonds.length >= CFG.MAX_BONDS) continue;
+        const dx = b.x - a.x, dy = b.y - a.y, reach = (a.r + b.r) * 1.1;
+        if (dx * dx + dy * dy > reach * reach || a.bonds.includes(b)) continue;
+        // (DEVPLAN: the side-adhesion gene, steeply: side-binding adhesion molecules are made in quantity or barely at all,
+        // so lineages below ~0.35 don't bind sideways and stay filaments or trees.)
+        let side = 1;
+        if (CFG.DEVPLAN) { const u = Math.min(1, Math.max(0, ((a.g[Gn.M_LATERAL] + b.g[Gn.M_LATERAL]) * 0.5 - 0.35) / 0.3)); side = u * u * (3 - 2 * u); }
+        if (rng.next() < P * side * (CFG.JUNCTIONS ? this.junction(a, b) : (a.adh + b.adh) * 0.5)) link(a, b);
+        if (a.bonds.length >= CFG.MAX_BONDS) break;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- developmental body plans (DEVPLAN)
+  // Whether a colony cell still divides: germ cells and colonies growing their copy (PARATOMY) always do; otherwise
+  // only within the growth zone: at the tips (few bonds) if the tip-growth gene is high, and within the growth
+  // radius of the body's centre (1 to 15 cell radii). Mature cells stop dividing, as in real tissues.
+  growthZone(c) {
+    if (!c.bonds.length || c.type === T_GERM || c.para || c.orgSize < 3) return true;
+    const g = c.g;
+    return c.bonds.length < 2 + (1 - g[Gn.M_BRANCH]) * 4 && c.orad < 1 + g[Gn.M_SIDE] * 14;
+  }
+  // The direction a cell grew in (from its mother), or a founder's own axis.
+  growAxis(c, up) { return up ? Math.atan2(c.y - up.y, c.x - up.x) : c.axis; }
+  // Bond a newborn where its division put it: its axis turned from the mother's own by the plane-turn gene (0 to 90°,
+  // to alternate sides), plus noise. Dividing straight along a filament, it goes in line, between the mother and
+  // the daughter already there (growth along the filament).
+  attachDev(c, child) {
+    const up = this.upCell(c), g = c.g, rng = this.w.rng, base = this.growAxis(c, up);
+    const turn = g[Gn.M_ANGLE] * 1.5707963 * (child.id & 1 ? 1 : -1), noise = (rng.next() - 0.5) * g[Gn.M_SPREAD] * 1.5707963;
+    const a = base + turn + noise, rest = (c.r + child.r) * 0.95;
+    child.up = c.id; child.rel = a - base; child.axis = a;
+    let inLine = null;
+    for (const o of c.bonds) {
+      if (!this.isDaughter(c, o)) continue;
+      let d = Math.atan2(o.y - c.y, o.x - c.x) - a;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      if (Math.abs(d) < 0.6) { inLine = o; break; }
+    }
+    if (inLine) {
+      c.bonds[c.bonds.indexOf(inLine)] = child;
+      inLine.bonds[inLine.bonds.indexOf(c)] = child;
+      child.bonds.push(c, inLine);
+      inLine.up = child.id; child.rel = inLine.rel; inLine.rel = 0;
+      child.x = child.x0 = (c.x + inLine.x) / 2; child.y = child.y0 = (c.y + inLine.y) / 2;
+    } else {
+      link(c, child);
+      child.x = child.x0 = c.x + Math.cos(a) * rest; child.y = child.y0 = c.y + Math.sin(a) * rest;
+    }
+  }
+
   // Daughters a cell may hold: 1-4 by its branching gene; a colony's founder one more (filaments grow both ways).
   maxDaughters(c, up) { return 1 + Math.floor(c.g[Gn.M_BRANCH] * 3.999) + (up ? 0 : 1); }
   // Direction of a cell's k-th daughter: turned from the cell's own direction by its growth genes; the founder
@@ -368,7 +435,7 @@ export class Life {
   morphAngle(c, k, up) {
     const g = c.g;
     if (!up) {
-      const f = c.bonds[0], a0 = f ? Math.atan2(f.y - c.y, f.x - c.x) : c.heading; // (its first daughter sets its axis)
+      const f = this.firstDaughter(c), a0 = f ? Math.atan2(f.y - c.y, f.x - c.x) : c.heading; // (its first daughter sets its axis)
       return a0 + (k * 6.283185307) / this.maxDaughters(c, null);
     }
     let off = (g[Gn.M_ANGLE] + k * g[Gn.M_SPREAD]) * 1.5707963;
@@ -380,7 +447,7 @@ export class Life {
   attach(c, child) {
     const up = this.upCell(c);
     let nd = 0, first = null;
-    for (const o of c.bonds) if (o !== up) { if (!first) first = o; nd++; }
+    for (const o of c.bonds) if (o !== up && this.isDaughter(c, o)) { if (!first) first = o; nd++; }
     child.up = c.id;
     const rest = (c.r + child.r) * 0.95;
     if (nd < this.maxDaughters(c, up) || !first) {
@@ -400,11 +467,15 @@ export class Life {
     const up = this.upCell(c), K = CFG.MORPH_STIFF, V = this.V, X = V.X, Y = V.Y, cs = c.slot, g = c.g;
     let k = 0;
     for (const o of c.bonds) {
-      if (o === up) continue;
+      if (o === up || !this.isDaughter(c, o)) continue;
       // (morphAngle, on the arrays: the cell moves after each daughter, so its direction is read afresh)
       let a;
-      if (!up) {
-        const f = c.bonds[0];
+      if (CFG.DEVPLAN) {
+        const f = this.firstDaughter(c);
+        const base = up ? Math.atan2(Y[cs] - Y[up.slot], X[cs] - X[up.slot]) : (f ? Math.atan2(Y[f.slot] - Y[cs], X[f.slot] - X[cs]) - f.rel : c.axis);
+        a = base + o.rel;
+      } else if (!up) {
+        const f = this.firstDaughter(c);
         a = (f ? Math.atan2(Y[f.slot] - Y[cs], X[f.slot] - X[cs]) : c.heading) + (k * 6.283185307) / this.maxDaughters(c, null);
       } else {
         let off = (g[Gn.M_ANGLE] + k * g[Gn.M_SPREAD]) * 1.5707963;
@@ -610,7 +681,8 @@ export class Life {
     // A colony growing its copy (PARATOMY) keeps every new cell, past its usual size limit.
     if (c.type !== T_GERM && c.bonds.length < CFG.MAX_BONDS && ((c.para && c.orgSize < c.paraT)
       || (c.orgSize < c.colMax && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh + CFG.ADH_BOOST))) {
-      if (CFG.MORPH) this.attach(c, child); else link(c, child);
+      if (CFG.DEVPLAN) this.attachDev(c, child); else if (CFG.MORPH) this.attach(c, child); else link(c, child);
+      child.orad = c.orad;
       child.org = c.org;
       child.orgSize = ++c.orgSize;
       child.type = c.type;
@@ -887,7 +959,7 @@ export class Life {
         c.nut -= nflow; o.nut += nflow;
       }
     }
-    if (CFG.MORPH) for (const c of cells) if (!c.dead && c.bonds.length) this.shapeForces(c);
+    if (CFG.MORPH || CFG.DEVPLAN) for (const c of cells) if (!c.dead && c.bonds.length) this.shapeForces(c);
     for (let i = 0; i < broken.length; i += 2) unlink(broken[i], broken[i + 1]);
 
     // Currents, plumes, jostling and walls: in parallel (move phase), from positions after the bonds. Then the
@@ -920,6 +992,7 @@ export class Life {
         for (const o of x.bonds) if (o._s !== stamp) { o._s = stamp; q.push(o); }
       }
       const comp = q.slice();
+      if ((CFG.NEIGHBOR_BOND || CFG.DEVPLAN) && !again && comp.length >= 3) this.neighbourBonds(comp);
       let keep = false; // (cells keep their jobs while the colony grows its copy)
       if (CFG.PARATOMY && !CFG.PARATOMY_EUK && root.mito) {
         for (const x of comp) x.para = false; // (eukaryotes reproduce through their germline instead)
@@ -968,6 +1041,7 @@ export class Life {
         org.x += x.x; org.y += x.y;
       }
       org.x /= size; org.y /= size;
+      if (CFG.DEVPLAN) for (const x of comp) x.orad = Math.hypot(x.x - org.x, x.y - org.y) / x.r;
       // Larger eukaryotic bodies set a germline aside (GERM_SETASIDE) if none of their cells chose it.
       if (CFG.GERM_SETASIDE > 0 && !keep && root.mito && size >= CFG.GERM_SETASIDE && org.types[T_GERM] === 0) {
         const o = Gn.DIFF + T_GERM * Gn.NDIFF_IN;

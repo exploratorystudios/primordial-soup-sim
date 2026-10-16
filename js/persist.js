@@ -46,7 +46,7 @@ export function serialize(w) {
       cells: L.cells.map((c) => ({
         id: c.id, x: c.x, y: c.y, vx: c.vx, vy: c.vy, g: b64(c.g), energy: c.energy, age: c.age, gen: c.gen, mito: c.mito, plastid: c.plastid,
         species: c.species, origin: c.origin, parentId: c.parentId, bonds: c.bonds.map((o) => o.id), type: c.type, org: c.org, orgSize: c.orgSize,
-        depth: c.depth, para: c.para, paraT: c.paraT, paraStart: c.paraStart, gf: c.gf, up: c.up, germKept: c.germKept, fated: c.fated, heading: c.heading, nut: c.nut, infected: c.infected, born: c.born, founderSeq: c.founderSeq, sexual: c.sexual,
+        depth: c.depth, para: c.para, paraT: c.paraT, paraStart: c.paraStart, gf: c.gf, up: c.up, germKept: c.germKept, fated: c.fated, axis: c.axis, rel: c.rel, orad: c.orad, heading: c.heading, nut: c.nut, infected: c.infected, born: c.born, founderSeq: c.founderSeq, sexual: c.sexual,
         px: c.px, py: c.py, fx: c.fx, fy: c.fy, dirX: c.dirX, dirY: c.dirY, // sensed directions and current heading
         r: c.r, rTarget: c.rTarget, endoT: c.endoT, mitoN: c.mitoN,
       })),
