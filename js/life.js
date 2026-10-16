@@ -593,17 +593,19 @@ export class Life {
       const F = this.w.fields;
       let nut = c.nut, en = Math.max(0, c.energy) * 0.5;
       // Recycling (RECYCLE): a colony's living neighbours take up the dying cell's material and energy.
-      if (CFG.RECYCLE && c.bonds.length) {
+      const fr = c.mito ? CFG.RECYCLE_EUK : CFG.RECYCLE_PROK;
+      if (CFG.RECYCLE && c.bonds.length && fr > 0) {
         let n = 0;
         for (const o of c.bonds) if (!o.dead) n++;
         if (n) {
+          const gn = (nut * fr) / n, ge = (en * fr) / n;
           for (const o of c.bonds) {
             if (o.dead) continue;
-            o.energy = Math.min(o.cap, o.energy + en / n);
-            o.nut += nut / n;
+            o.energy = Math.min(o.cap, o.energy + ge);
+            o.nut += gn;
             if (o.nut > o.nutNeed) { F.add(F.nutrient, o.x, o.y, o.nut - o.nutNeed); o.nut = o.nutNeed; }
           }
-          nut = 0; en = 0;
+          nut *= 1 - fr; en *= 1 - fr;
         }
       }
       F.add(F.organic, c.x, c.y, (en + c.m * 8) * CFG.DEATH_ORG);

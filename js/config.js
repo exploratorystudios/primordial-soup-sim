@@ -144,6 +144,12 @@ export const CFG = {
   RECYCLE: true,           // a colony cell that dies (not eaten) passes its nutrient (its body material) and half its
                            // energy to its bonded neighbours instead of the water (apoptosis: neighbours reuse dying cells),
                            // so they can divide to replace it and bodies persist through cell turnover
+  // With RECYCLE, the share of a dying cell's nutrient and energy its body keeps (the rest goes to the water).
+  // Eukaryotes engulf dying neighbours (phagocytosis) and keep most; a bacterium bursts, and its colony's
+  // matrix traps only part. Keeping everything in bacterial colonies (1) locked the world's nutrient inside
+  // them: free-living cells starved and no eukaryotes arose.
+  RECYCLE_PROK: 0.3,
+  RECYCLE_EUK: 0.9,
   JUNCTIONS: true,         // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
                            // and hold tissue): stronger bonds break less at random, stretch up to twice as far and pull
                            // back harder, and when a cell dies its neighbours re-bond (heal) with that chance
