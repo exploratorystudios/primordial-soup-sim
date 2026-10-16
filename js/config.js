@@ -99,6 +99,9 @@ export const CFG = {
   GERM_SETASIDE: 16,       // eukaryotic colonies of at least this many cells with no germline set one cell aside as
                            // germline (the one whose fate genes lean most toward it, unless they are strongly against:
                            // score below -0.5), as germ/body splits appear with size in Volvox and its relatives. 0 = off
+  FATE_COMMIT: 0.2,        // cell-fate commitment: a colony cell keeps its job unless another job's score beats it by this
+                           // much (differentiated cells hold their identity; 0 = re-decide from scratch every 10 ticks)
+  GERM_KEEP: true,         // a cell set aside as germline stays germline while it is in the body (germlines are set aside for good)
   GERM_MUT: 0.2,           // mutation rate of a germline cell's offspring, as a fraction of normal: germ cells divide
                            // rarely and are kept from damage (the Weismann barrier), so their offspring start cleaner
   PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway

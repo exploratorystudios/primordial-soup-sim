@@ -41,6 +41,7 @@ export class Cell {
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
     this.up = 0; // MORPH: the colony cell this one grew from (its body-plan 'parent' bond)
+    this.germKept = false; // GERM_KEEP: set aside as germline, for good
     this.gf = 1; // TRADEOFF / SPEC_BONUS: this colony cell's strength at its jobs
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
@@ -840,7 +841,7 @@ export class Life {
     for (const c of cells) {
       if (c.dead || c._s === stamp) continue;
       c._s = stamp;
-      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; if (c.gf !== 1) { c.gf = 1; c.sv++; } if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
+      if (c.bonds.length === 0) { c.org = c.id; c.orgSize = 1; c.depth = 0; c.para = false; c.germKept = false; if (c.gf !== 1) { c.gf = 1; c.sv++; } if (c.type !== T_GENERIC) { c.type = T_GENERIC; c.sv++; } continue; }
       q.length = 0; q.push(c);
       let root = c;
       for (let k = 0; k < q.length; k++) {
@@ -885,7 +886,7 @@ export class Life {
       for (const x of comp) {
         x.org = root.id;
         x.orgSize = size;
-        const nt = keep ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
+        const nt = keep || (CFG.GERM_KEEP && x.germKept && x.type === T_GERM) ? x.type : this.differentiate(x, size, w.lightAt(x.x, x.y));
         if (nt !== x.type) { x.type = nt; x.sv++; }
         // Doing every job at once costs a colony's generalists more the bigger it is (TRADEOFF), and its
         // specialists get better at their one job (SPEC_BONUS).
@@ -908,7 +909,7 @@ export class Life {
         }
         if (best) {
           org.types[best.type]--; org.types[T_GERM]++;
-          best.type = T_GERM;
+          best.type = T_GERM; best.germKept = true;
           best.gf = 1 + CFG.SPEC_BONUS * Math.min(1, (size - 1) / 15);
           best.sv++;
         }
@@ -975,14 +976,17 @@ export class Life {
     const g = x.g;
     const prok = CFG.REALISTIC_MULTI && !x.mito; // bacteria: no mouth (phagocytosis) or germline cells
     const i1 = x.bonds.length / 4, i2 = Math.min(1, x.depth / 6), i3 = Math.min(1, size / 30);
-    let best = 0, bs = -1e9;
+    let best = 0, bs = -1e9, cur = -1e9;
     for (let t = 0; t < Gn.NTYPES; t++) {
       if (prok && (t === T_MOUTH || t === T_GERM)) continue;
       const o = Gn.DIFF + t * Gn.NDIFF_IN;
       let s = g[o] + g[o + 1] * i1 + g[o + 2] * i2 + g[o + 3] * i3 + g[o + 4] * light;
       if (t === 0) s += CFG.GENERALIST_BIAS;
+      if (t === x.type) cur = s;
       if (s > bs) { bs = s; best = t; }
     }
+    // Commitment: switching jobs needs a clear reason, not a small nudge in its cues.
+    if (best !== x.type && cur > -1e9 && bs < cur + CFG.FATE_COMMIT) return x.type;
     return best;
   }
 
