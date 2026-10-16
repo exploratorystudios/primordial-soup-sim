@@ -125,6 +125,7 @@ export class Life {
     this.oiMap = new Map(); this.nOi = 0; this.oiOrg = new Int32Array(0);
     this.WS = this.WN = this.SWX = this.SWY = this.SWM = this.PPX = this.PPY = this.PPA = new Float64Array(0); this.PPHAS = new Uint8Array(0);
     this.anySwim = false;
+    this.soa = false; // positions in the shared arrays during a tick (see pull)
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
     this.xs = new Float32Array(4096);
@@ -227,6 +228,7 @@ export class Life {
     this.prepareKernels(n);
     const V = this.V, F = this.w.fields;
     this.packCells(V);
+    this.soa = true; // (positions in the arrays until physics writes them back)
     this.runPhase(V, 'cells');
     this.groupByField(V);
     this.runPhase(V, 'share');
@@ -241,7 +243,7 @@ export class Life {
         const i = this.orgSlot(c);
         if (!(this.SWM[i] > 0)) continue;
         const f = 1 / Math.max(1, Math.sqrt(this.SWM[i]));
-        c.vx += this.SWX[i] * f; c.vy += this.SWY[i] * f;
+        this.V.VXC[c.slot] += this.SWX[i] * f; this.V.VYC[c.slot] += this.SWY[i] * f;
       }
     }
 
@@ -395,17 +397,28 @@ export class Life {
   }
   // Angle springs: pull each daughter toward where the body plan puts it (and the cell the other way).
   shapeForces(c) {
-    const up = this.upCell(c), K = CFG.MORPH_STIFF;
+    const up = this.upCell(c), K = CFG.MORPH_STIFF, V = this.V, X = V.X, Y = V.Y, cs = c.slot, g = c.g;
     let k = 0;
     for (const o of c.bonds) {
       if (o === up) continue;
-      const a = this.morphAngle(c, k++, up);
+      // (morphAngle, on the arrays: the cell moves after each daughter, so its direction is read afresh)
+      let a;
+      if (!up) {
+        const f = c.bonds[0];
+        a = (f ? Math.atan2(Y[f.slot] - Y[cs], X[f.slot] - X[cs]) : c.heading) + (k * 6.283185307) / this.maxDaughters(c, null);
+      } else {
+        let off = (g[Gn.M_ANGLE] + k * g[Gn.M_SPREAD]) * 1.5707963;
+        if (g[Gn.M_SIDE] > 0.5 && ((k + c.depth) & 1)) off = -off;
+        a = Math.atan2(Y[cs] - Y[up.slot], X[cs] - X[up.slot]) + off;
+      }
+      k++;
       if (o.dead) continue;
-      const rest = (c.r + o.r) * 0.95;
-      const dx = (c.x + Math.cos(a) * rest - o.x) * K, dy = (c.y + Math.sin(a) * rest - o.y) * K;
-      o.x += dx; o.y += dy; c.x -= dx; c.y -= dy;
+      const os = o.slot, rest = (c.r + o.r) * 0.95;
+      const dx = (X[cs] + Math.cos(a) * rest - X[os]) * K, dy = (Y[cs] + Math.sin(a) * rest - Y[os]) * K;
+      X[os] += dx; Y[os] += dy; X[cs] -= dx; Y[cs] -= dy;
     }
   }
+
 
   // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
   steer(c, tm, s) {
@@ -421,9 +434,28 @@ export class Life {
     if (col) { this.SWX[oi] += c.dirX * mot * CFG.MOT_SPEED; this.SWY[oi] += c.dirY * mot * CFG.MOT_SPEED; }
     else {
       const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
-      c.vx += c.dirX * th; c.vy += c.dirY * th;
+      V.VXC[s] += c.dirX * th; V.VYC[s] += c.dirY * th;
     }
     c.energy -= mot * CFG.MOT_COST * c.m;
+  }
+
+  // ---------------------------------------------------------------- positions during a tick
+  // From packCells until the end of physics, cells' positions and velocities live in the shared arrays
+  // (V.X, V.Y, V.VXC, V.VYC; this.soa), and are written back to the cells once, at the end. pull() brings a cell
+  // object up to date where code reads its position in between (collision events, deaths, healing).
+  pull(c) {
+    if (!this.soa) return;
+    const s = c.slot;
+    if (s >= 0 && this.slotCell[s] === c) { c.x = this.V.X[s]; c.y = this.V.Y[s]; }
+  }
+  // A newborn's slot, at birth (bonds and body springs move it this tick, in the arrays).
+  slotNow(c) {
+    const V = this.V;
+    if (!this.soa || !V) return;
+    const s = this.freeSlots.length ? this.freeSlots.pop() : this.nextSlot++;
+    if (s >= V.X.length) throw new Error('no room for a newborn in the shared arrays'); // (prepareKernels leaves room)
+    c.slot = s; this.slotCell[s] = c;
+    V.X[s] = c.x; V.Y[s] = c.y; V.VXC[s] = c.vx; V.VYC[s] = c.vy;
   }
 
   // ---------------------------------------------------------------- parallel phases (kernels.js, pool.js)
@@ -439,7 +471,8 @@ export class Life {
   // Shared (or local) arrays for this tick, with the grids, fields and light settings copied in.
   prepareKernels(n) {
     const w = this.w, F = w.fields, h = this.hash, cells = this.cells;
-    const V = kernelViews(this.nextSlot + 16, (w.viruses ? w.viruses.list.length : 0) + 64, h.nc, F.n, w.sunTable.length);
+    // (room for every slot in use, and for this tick's births: newborns get their slot at birth, see slotNow)
+    const V = kernelViews(this.nextSlot + 16 + Math.max(0, CFG.MAX_CELLS - n), (w.viruses ? w.viruses.list.length : 0) + 64, h.nc, F.n, w.sunTable.length);
     this.V = V;
     const P = V.P;
     P[K.P_T] = w.t; P[K.P_SEED] = w.seed | 0; P[K.P_MAXR] = this.maxR;
@@ -471,7 +504,7 @@ export class Life {
       const c = cells[k], s = c.slot;
       V.ORDER[k] = s; V.RANK[s] = k;
       if (V.SVER[s] !== c.sv || V.ID[s] !== c.id) this.packTraits(V, c, s);
-      V.X[s] = c.x; V.Y[s] = c.y; V.ORG[s] = c.org; V.NUT[s] = c.nut;
+      V.X[s] = c.x; V.Y[s] = c.y; V.VXC[s] = c.vx; V.VYC[s] = c.vy; V.ORG[s] = c.org; V.NUT[s] = c.nut;
       let f = V.SFLAGS[s];
       if (c.dead) f |= K.F_DEAD;
       if (c.infected) f |= K.F_INFECTED;
@@ -589,6 +622,7 @@ export class Life {
       if (c.orgSize >= 8 && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell releases a spore to found the next generation of a multicellular organism', c);
     }
     child.sexual = sexual;
+    this.slotNow(child);
     this.newborns.push(child);
     this.w.emit('divide', 30, { a: c, b: child, mx, my });
     this.births++;
@@ -616,6 +650,7 @@ export class Life {
     this.deaths[cause] = (this.deaths[cause] || 0) + 1;
     if (!eaten) {
       const F = this.w.fields;
+      this.pull(c);
       let nut = c.nut, en = Math.max(0, c.energy) * 0.5;
       // Recycling (RECYCLE): a colony's living neighbours take up the dying cell's material and energy.
       const fr = c.mito ? CFG.RECYCLE_EUK : CFG.RECYCLE_PROK;
@@ -651,6 +686,7 @@ export class Life {
     for (let i = 1; i < nb.length; i++) {
       const a = nb[i - 1], b = nb[i];
       if (a.dead || b.dead || a.bonds.includes(b) || a.bonds.length >= CFG.MAX_BONDS || b.bonds.length >= CFG.MAX_BONDS) continue;
+      this.pull(a); this.pull(b);
       const dx = b.x - a.x, dy = b.y - a.y, reach = (a.r + b.r) * 0.95 * 3;
       if (dx * dx + dy * dy > reach * reach || rng.next() >= this.junction(a, b)) continue;
       link(a, b);
@@ -670,6 +706,7 @@ export class Life {
       for (let q = ch * seg, qe = q + R.EVN[ch]; q < qe; q += 3) {
         const a = slotCell[R.EV[q]], b = slotCell[R.EV[q + 1]];
         if (a.dead || b.dead) continue;
+        this.pull(a); this.pull(b);
         const ate = this.tryEat(a, b) || this.tryEat(b, a);
         if (!ate && CFG.SYMBIO_P > 0 && !a.dead && !b.dead) this.trySymbiosis(a, b) || this.trySymbiosis(b, a);
         if (R.EV[q + 2] && !a.dead && !b.dead) this.transferGene(a, b);
@@ -694,7 +731,7 @@ export class Life {
         const c = cells[k];
         if (c.dead) continue;
         const s = c.slot;
-        c.x += R.PUSHX[s]; c.y += R.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
+        V.X[s] += R.PUSHX[s]; V.Y[s] += R.PUSHY[s];
       }
       return;
     }
@@ -728,7 +765,7 @@ export class Life {
         px -= R.FPUSHX[s] * f; py -= R.FPUSHY[s] * f;
         if (PPHAS[i] && PPA[i] > 0) { px += PPX[i] / PPA[i]; py += PPY[i] / PPA[i]; }
       }
-      c.x += px; c.y += py; V.X[s] = c.x; V.Y[s] = c.y;
+      V.X[s] += px; V.Y[s] += py;
     }
   }
 
@@ -818,23 +855,25 @@ export class Life {
   }
 
   physics() {
-    const cells = this.cells, rng = this.w.rng;
+    const cells = this.cells, rng = this.w.rng, V = this.V, X = V.X, Y = V.Y, VX = V.VXC, VY = V.VYC;
     const broken = [];
     for (const c of cells) {
       if (c.dead) continue;
+      const cs = c.slot;
       for (const o of c.bonds) {
         if (o.id < c.id || o.dead) continue;
-        const dx = o.x - c.x, dy = o.y - c.y;
+        const os = o.slot;
+        const dx = X[os] - X[cs], dy = Y[os] - Y[cs];
         const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
         const rest = (c.r + o.r) * 0.95;
         const js = CFG.JUNCTIONS ? this.junction(c, o) : 0; // (0 = the old fixed bond)
         if (d > rest * (3 + 3 * js) || rng.next() < CFG.BOND_BREAK * (1 - js)) { broken.push(c, o); continue; }
         const k = ((d - rest) / d) * 0.25 * (1 + js);
-        c.x += dx * k; c.y += dy * k; o.x -= dx * k; o.y -= dy * k;
+        X[cs] += dx * k; Y[cs] += dy * k; X[os] -= dx * k; Y[os] -= dy * k;
         // Bonded cells move together.
-        const mvx = (c.vx + o.vx) * 0.5, mvy = (c.vy + o.vy) * 0.5;
-        c.vx += (mvx - c.vx) * 0.3; c.vy += (mvy - c.vy) * 0.3;
-        o.vx += (mvx - o.vx) * 0.3; o.vy += (mvy - o.vy) * 0.3;
+        const mvx = (VX[cs] + VX[os]) * 0.5, mvy = (VY[cs] + VY[os]) * 0.5;
+        VX[cs] += (mvx - VX[cs]) * 0.3; VY[cs] += (mvy - VY[cs]) * 0.3;
+        VX[os] += (mvx - VX[os]) * 0.3; VY[os] += (mvy - VY[os]) * 0.3;
         // Energy flows down the gradient; germ cells act as sinks.
         const fa = (c.energy / c.cap) * (c.type === T_GERM ? 0.5 : 1);
         const fb = (o.energy / o.cap) * (o.type === T_GERM ? 0.5 : 1);
@@ -851,22 +890,15 @@ export class Life {
     if (CFG.MORPH) for (const c of cells) if (!c.dead && c.bonds.length) this.shapeForces(c);
     for (let i = 0; i < broken.length; i += 2) unlink(broken[i], broken[i + 1]);
 
-    // Currents, plumes, jostling and walls: in parallel (move phase), from positions after the bonds.
-    const V = this.V, n = cells.length;
-    for (let k = 0; k < n; k++) {
-      const c = cells[k];
-      if (c.dead) continue;
-      const s = c.slot;
-      V.X[s] = c.x; V.Y[s] = c.y; V.VXC[s] = c.vx; V.VYC[s] = c.vy;
-    }
+    // Currents, plumes, jostling and walls: in parallel (move phase), from positions after the bonds. Then the
+    // positions go back to the cells (and the newborns, which bonds may have moved).
     this.runPhase(V, 'move');
-    for (let k = 0; k < n; k++) {
-      const c = cells[k];
-      if (c.dead) continue;
-      const s = c.slot;
-      c.x = V.X[s]; c.y = V.Y[s]; c.vx = V.VXC[s]; c.vy = V.VYC[s];
-    }
+    this.soa = false;
+    const back = (c) => { const s = c.slot; c.x = X[s]; c.y = Y[s]; c.vx = VX[s]; c.vy = VY[s]; };
+    for (let k = 0, n = cells.length; k < n; k++) if (!cells[k].dead) back(cells[k]);
+    for (const c of this.newborns) if (c.slot >= 0 && this.slotCell[c.slot] === c) back(c);
   }
+
 
   // Find connected colonies, compute positional information and let each cell's
   // gene-regulatory network choose its fate.
