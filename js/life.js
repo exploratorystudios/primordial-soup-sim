@@ -531,7 +531,7 @@ export class Life {
       }
     }
     // DNA polymerases proofread; RNA copying is sloppy.
-    const g = Gn.mutate(base, rng, 1 - (1 - CFG.DNA_MUT) * c.dnaLevel);
+    const g = Gn.mutate(base, rng, (1 - (1 - CFG.DNA_MUT) * c.dnaLevel) * (c.type === T_GERM ? CFG.GERM_MUT : 1));
     const ang = rng.next() * 6.283;
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const child = this.makeCell(c.x + ca * c.r * 0.6, c.y + sa * c.r * 0.6, g, c);
@@ -791,7 +791,9 @@ export class Life {
       }
       const comp = q.slice();
       let keep = false; // (cells keep their jobs while the colony grows its copy)
-      if (CFG.PARATOMY) {
+      if (CFG.PARATOMY && !CFG.PARATOMY_EUK && root.mito) {
+        for (const x of comp) x.para = false; // (eukaryotes reproduce through their germline instead)
+      } else if (CFG.PARATOMY) {
         // Paratomy: a colony that can grow no further first doubles, its new cells taking their parent's job,
         // then splits into two halves with matching make-up.
         const rep = comp.length >= 4 ? comp.find((x) => x.para) : undefined;

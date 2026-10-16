@@ -92,6 +92,10 @@ export const CFG = {
   PARATOMY: false,         // instead of splitting at its size limit, a colony first grows a copy of itself (new cells
                            // keep their parent's job) to double size, then splits into two matching halves (cf. annelid
                            // and flatworm paratomy, Volvox daughter colonies). Takes the place of FRAGMENT.
+  PARATOMY_EUK: true,      // with PARATOMY, eukaryotic colonies reproduce by paratomy too; false = bacteria only, as in
+                           // nature (filamentous bacteria fragment; complex eukaryotes go through a spore or egg)
+  GERM_MUT: 1,             // mutation rate of a germline cell's offspring, as a fraction of normal: germ cells divide
+                           // rarely and are kept from damage (the Weismann barrier), so their offspring start cleaner
   PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway
   PARA_COST: 0.01,         // extra upkeep (x metabolic size) for a doubling colony beyond the oxygen-limited body size
   TRADEOFF: 0,             // convex trade-off (Michod): a generalist cell in a colony feeds, swims and hunts at
