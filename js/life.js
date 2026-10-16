@@ -595,7 +595,25 @@ export class Life {
       F.add(F.nutrient, c.x, c.y, c.nut);
       c.nut = 0;
     }
-    for (const o of c.bonds.slice()) unlink(c, o);
+    const nb = c.bonds.slice();
+    for (const o of nb) unlink(c, o);
+    if (CFG.JUNCTIONS && nb.length >= 2) this.heal(c, nb);
+  }
+
+  // Bond strength from the two cells' adhesion genes (JUNCTIONS).
+  junction(a, b) { const s = (a.adh + b.adh) * 0.5; return s > 1 ? 1 : s; }
+  // Wound healing: the dead cell's neighbours bond to each other in turn, each with their junction strength, if
+  // they're within reach and have room. (Body plans: a neighbour that grew from the dead cell now grows from its partner.)
+  heal(dead, nb) {
+    const rng = this.w.rng;
+    for (let i = 1; i < nb.length; i++) {
+      const a = nb[i - 1], b = nb[i];
+      if (a.dead || b.dead || a.bonds.includes(b) || a.bonds.length >= CFG.MAX_BONDS || b.bonds.length >= CFG.MAX_BONDS) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, reach = (a.r + b.r) * 0.95 * 3;
+      if (dx * dx + dy * dy > reach * reach || rng.next() >= this.junction(a, b)) continue;
+      link(a, b);
+      if (b.up === dead.id) b.up = a.id; else if (a.up === dead.id) a.up = b.id;
+    }
   }
 
   // Collisions, predation and horizontal gene transfer. Every cell's push comes from the same positions
@@ -730,8 +748,9 @@ export class Life {
         const dx = o.x - c.x, dy = o.y - c.y;
         const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
         const rest = (c.r + o.r) * 0.95;
-        if (d > rest * 3 || rng.next() < CFG.BOND_BREAK) { broken.push(c, o); continue; }
-        const k = ((d - rest) / d) * 0.25;
+        const js = CFG.JUNCTIONS ? this.junction(c, o) : 0; // (0 = the old fixed bond)
+        if (d > rest * (3 + 3 * js) || rng.next() < CFG.BOND_BREAK * (1 - js)) { broken.push(c, o); continue; }
+        const k = ((d - rest) / d) * 0.25 * (1 + js);
         c.x += dx * k; c.y += dy * k; o.x -= dx * k; o.y -= dy * k;
         // Bonded cells move together.
         const mvx = (c.vx + o.vx) * 0.5, mvy = (c.vy + o.vy) * 0.5;

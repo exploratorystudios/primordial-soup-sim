@@ -139,6 +139,9 @@ export const CFG = {
   SPECIATE: 0.07,
   DAMP: 0.82,
   BOND_BREAK: 0.00015,
+  JUNCTIONS: false,        // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
+                           // and hold tissue): stronger bonds break less at random, stretch up to twice as far and pull
+                           // back harder, and when a cell dies its neighbours re-bond (heal) with that chance
   SHARE_K: 0.1,
   MAX_BONDS: 5,
   // Multicellularity as on Earth: bacteria form colonies and simple multicellular organisms (no mouth or
