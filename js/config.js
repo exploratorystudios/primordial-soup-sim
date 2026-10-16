@@ -105,6 +105,8 @@ export const CFG = {
   MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
   CULL_FAIR: false,        // the crowding cull judges a colony cell by its colony's average weakness, not its own
                            // (colony cells share energy, so one alone can look weak while its colony is healthy)
+  GERM_STEM: false,        // germline stem cells: a ready germ cell stays in the body and releases its daughter as the
+                           // next generation's founder (a spore or egg), instead of leaving the body itself
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
@@ -163,3 +165,17 @@ export const CFG = {
   NUT_PER_AREA: 2.0,       // nutrient locked into each unit of cell body
   NUT_UPTAKE: 0.06,
 };
+
+// The defaults, kept so a saved world records (and loading restores) exactly which settings differed.
+export const CFG_DEFAULTS = Object.freeze(JSON.parse(JSON.stringify(CFG)));
+// Settings that differ from the defaults (THREADS belongs to the machine, not the world).
+export function cfgChanges() {
+  const o = {};
+  for (const k in CFG) if (k !== 'THREADS' && JSON.stringify(CFG[k]) !== JSON.stringify(CFG_DEFAULTS[k])) o[k] = CFG[k];
+  return o;
+}
+// Back to the defaults, plus these changes.
+export function setCfg(changes) {
+  for (const k in CFG_DEFAULTS) if (k !== 'THREADS') CFG[k] = JSON.parse(JSON.stringify(CFG_DEFAULTS[k]));
+  Object.assign(CFG, changes);
+}

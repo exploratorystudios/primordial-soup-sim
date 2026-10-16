@@ -304,7 +304,8 @@ export class Life {
     }
 
     // A germline cell full of energy buds off to found a new organism.
-    if (c.type === T_GERM && c.bonds.length && c.orgSize >= 6 && c.energy > 0.7 * c.cap) {
+    // (With GERM_STEM the germ cell stays put and its daughters leave instead: see divide.)
+    if (!CFG.GERM_STEM && c.type === T_GERM && c.bonds.length && c.orgSize >= 6 && c.energy > 0.7 * c.cap) {
       const fromOrganism = c.orgSize >= 8;
       for (const o of c.bonds.slice()) unlink(c, o);
       c.type = T_GENERIC; c.sv++; c.orgSize = 1; c.org = c.id;
@@ -556,6 +557,11 @@ export class Life {
       child.orgSize = ++c.orgSize;
       child.type = c.type;
       if (c.para) { child.para = true; child.paraT = c.paraT; child.paraStart = c.paraStart; }
+    }
+    // A germline stem cell's daughter (germ cells never stay bonded) leaves to found the next generation.
+    if (CFG.GERM_STEM && c.type === T_GERM) {
+      child.type = T_GENERIC;
+      if (c.orgSize >= 8 && this.w.mset.has('multicellular')) this.w.milestone('germline', 'A germline cell releases a spore to found the next generation of a multicellular organism', c);
     }
     child.sexual = sexual;
     this.newborns.push(child);

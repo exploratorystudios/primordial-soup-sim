@@ -27,7 +27,7 @@ const cfgOverrides = {};
 try { Object.assign(cfgOverrides, JSON.parse(params.get('cfg') || '{}')); } catch { /* ignore a malformed cfg */ }
 if (params.get('day') === 'always') Object.assign(cfgOverrides, { DAY_MEAN: 1, DAY_SWING: 0 });
 Object.assign(CFG, cfgOverrides);
-const extraParams = [...params].filter(([k]) => k === 'cfg' || k === 'day').map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
+let extraParams = [...params].filter(([k]) => k === 'cfg' || k === 'day').map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
 const urlFor = (s) => `?seed=${s}${extraParams}`;
 let seed = +params.get('seed') || Math.floor(Math.random() * 1e6) + 1;
 $('seed').value = seed;
@@ -71,13 +71,16 @@ function setMax(on) { maxOn = on; speedLabel(); }
 if (params.get('speed') === 'max') { maxOn = true; setSpeed(speedIdx); }
 else setSpeed(params.has('speed') ? speedIndexOf(+params.get('speed') || SPEEDS[0]) : speedIdx);
 $('scale-note').textContent = `Everything is drawn at true size (habitat ${(CFG.W / 2000).toFixed(1)} × ${(CFG.H / 2000).toFixed(1)} mm). Select something first and the preset zooms into it.`;
-if (Object.keys(cfgOverrides).length) {
-  const what = params.get('day') === 'always' ? 'always daytime (full sun)' : JSON.stringify(cfgOverrides);
+function showCfgNote(from) {
+  document.querySelector('.cfg-note')?.remove();
+  if (!Object.keys(cfgOverrides).length) return;
+  const what = params.get('day') === 'always' && from === 'the address bar' ? 'always daytime (full sun)' : JSON.stringify(cfgOverrides);
   const note = document.createElement('p');
   note.className = 'cfg-note';
-  note.textContent = `Custom settings (from the address bar): ${what}. Remove them from the URL to go back to normal.`;
+  note.textContent = `Custom settings (from ${from}): ${what}. Remove them from the URL to go back to normal.`;
   $('scale-note').after(note);
 }
+showCfgNote('the address bar');
 
 function newWorld(s) {
   if (typeof story !== 'undefined') story.stop();
@@ -343,8 +346,15 @@ $('file-load').onchange = async (e) => {
     $('seed').value = seed;
     ui.reset();
     ui.seenLogs = w.logs.length; // don't replay old notifications
+    // The save's own settings now apply (also to new worlds and the tour), and the address shows them.
+    if (w.loadedCfg) {
+      for (const k of Object.keys(cfgOverrides)) delete cfgOverrides[k];
+      Object.assign(cfgOverrides, w.loadedCfg);
+      extraParams = Object.keys(cfgOverrides).length ? `&cfg=${encodeURIComponent(JSON.stringify(cfgOverrides))}` : '';
+      showCfgNote('the saved world');
+    }
     history.replaceState(null, '', urlFor(seed));
-    ui.toast(`Loaded seed ${seed} at tick ${w.t.toLocaleString()}`, w.t);
+    ui.toast(`Loaded seed ${seed} at tick ${w.t.toLocaleString()}${w.loadedCfg ? '' : ' (this save didn’t record its settings, so the current ones stay)'}`, w.t);
   } catch (err) {
     ui.toast(`Could not load: ${err.message}`, world.t);
   }

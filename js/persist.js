@@ -3,6 +3,7 @@
 import { World } from './world.js';
 import { Cell, decode } from './life.js';
 import * as Gn from './genome.js';
+import { cfgChanges, setCfg } from './config.js';
 
 const VERSION = 1;
 
@@ -30,6 +31,7 @@ export function serialize(w) {
   const F = w.fields, soup = w.soup, L = w.life, n = soup.n;
   return {
     version: VERSION, seed: w.seed, t: w.t, rng: { s: w.rng.s, spare: w.rng._spare },
+    cfg: cfgChanges(), // settings that differ from the defaults
     env: { vents: w.vents, lightMul: w.lightMul, ventMul: w.ventMul, timers: w.timers, phase: w.phase, o2: w.o2, atmO2: w.atmO2 },
     fields: { chem: b64(F.chem), organic: b64(F.organic), oxygen: b64(F.oxygen), nutrient: b64(F.nutrient) },
     record: { milestones: w.milestones, logs: w.logs, history: w.history, historyEvery: w.historyEvery },
@@ -125,5 +127,10 @@ export async function loadFromFile(file) {
   } else {
     text = new TextDecoder().decode(buf);
   }
-  return deserialize(JSON.parse(text));
+  // Restore the settings the world ran with (before building it), if the file recorded them.
+  const d = JSON.parse(text);
+  if (d.cfg) setCfg(d.cfg);
+  const w = deserialize(d);
+  w.loadedCfg = d.cfg || null;
+  return w;
 }
