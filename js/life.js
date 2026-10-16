@@ -117,6 +117,7 @@ export class Life {
     this.w = world;
     this.cells = [];
     this.newborns = [];
+    this.orgWeak = new Map(); // CULL_FAIR: each colony's summed weakness and cell count this tick
     this.swim = new Map(); // COLONY_SWIM: each colony's thrust and mass this tick
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
@@ -201,8 +202,18 @@ export class Life {
 
     // Crowding cull weights: mean weakness² this tick, so selective culling keeps the overall rate unchanged.
     if (CFG.CULL_SELECTIVE && n > CFG.MAX_CELLS * 0.85) {
+      if (CFG.CULL_FAIR) {
+        this.orgWeak.clear();
+        for (let i = 0; i < n; i++) {
+          const c = cells[i];
+          if (!c.bonds.length) continue;
+          let a = this.orgWeak.get(c.org);
+          if (!a) { a = { s: 0, n: 0 }; this.orgWeak.set(c.org, a); }
+          a.s += this.weakness(c); a.n++;
+        }
+      }
       let sw = 0;
-      for (let i = 0; i < n; i++) { const w = this.weakness(cells[i]); sw += w * w; }
+      for (let i = 0; i < n; i++) { const w = this.cullWeakness(cells[i]); sw += w * w; }
       this.meanWeak = sw / n || 1;
     }
     // The heavy per-cell work runs in parallel phases (kernels.js): metabolism, sensing and steering, then
@@ -246,6 +257,11 @@ export class Life {
   // How close a cell is to death: drained energy, old age, or an infection that will burst it (0 healthy … 1).
   // Energy is measured against a standard tank for the cell's size (how long it would last), so eukaryotes'
   // larger tanks (2.2x) don't make healthy ones look half-empty.
+  // What the crowding cull goes by: with CULL_FAIR, a colony cell counts as its colony's average.
+  cullWeakness(c) {
+    if (CFG.CULL_FAIR && c.bonds.length) { const a = this.orgWeak.get(c.org); if (a) return a.s / a.n; }
+    return this.weakness(c);
+  }
   weakness(c) {
     if (c.infected) return 1;
     const e = 1 - c.energy / (CFG.CAP_K * c.m), a = c.age / c.lifespan;
@@ -283,7 +299,7 @@ export class Life {
     const fill = this.cells.length / CFG.MAX_CELLS;
     if (fill > 0.85) {
       let p = (fill - 0.85) * 0.02;
-      if (CFG.CULL_SELECTIVE) { const wk = this.weakness(c); p *= (wk * wk) / this.meanWeak; } // the weakest go first
+      if (CFG.CULL_SELECTIVE) { const wk = this.cullWeakness(c); p *= (wk * wk) / this.meanWeak; } // the weakest go first
       if (rng.next() < p) { this.kill(c, 'crowding', false); return; }
     }
 

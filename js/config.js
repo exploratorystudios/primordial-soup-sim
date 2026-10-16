@@ -103,6 +103,8 @@ export const CFG = {
                            // each new colony cell attaches, and angle springs hold the shape, so offspring regrow their
                            // parent's form (or a mutated one). Filaments grow by inserting cells along their length.
   MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
+  CULL_FAIR: false,        // the crowding cull judges a colony cell by its colony's average weakness, not its own
+                           // (colony cells share energy, so one alone can look weak while its colony is healthy)
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
