@@ -41,6 +41,7 @@ export class Cell {
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
     this.up = 0; // MORPH: the colony cell this one grew from (its body-plan 'parent' bond)
+    this.oi = -1; // this tick's index of its colony in Life's per-colony arrays (see orgSlot)
     this.germKept = false; // GERM_KEEP: set aside as germline, for good
     this.fated = false; // FATE_COMMIT: has chosen its own job as a colony cell (newborns choose freely first)
     this.gf = 1; // TRADEOFF / SPEC_BONUS: this colony cell's strength at its jobs
@@ -119,9 +120,11 @@ export class Life {
     this.w = world;
     this.cells = [];
     this.newborns = [];
-    this.orgWeak = new Map(); // CULL_FAIR: each colony's summed weakness and cell count this tick
-    this.pushPool = new Map(); // TISSUE_PUSH: each colony's shared push this pass
-    this.swim = new Map(); // COLONY_SWIM: each colony's thrust and mass this tick
+    // Per-colony sums, in arrays indexed by orgSlot (rebuilt each tick): CULL_FAIR's weakness (WS, WN),
+    // COLONY_SWIM's thrust and mass (SWX, SWY, SWM) and TISSUE_PUSH's shared push (PPX, PPY, PPA, PPHAS).
+    this.oiMap = new Map(); this.nOi = 0; this.oiOrg = new Int32Array(0);
+    this.WS = this.WN = this.SWX = this.SWY = this.SWM = this.PPX = this.PPY = this.PPA = new Float64Array(0); this.PPHAS = new Uint8Array(0);
+    this.anySwim = false;
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
     this.hash = new SpatialHash(CFG.W, CFG.H, CFG.LIFE_HASH);
     this.xs = new Float32Array(4096);
@@ -174,6 +177,7 @@ export class Life {
 
   // ------------------------------------------------------------------- step
   step() {
+    this.oiMap.clear(); this.nOi = 0; // (this tick's colony indices, made as needed)
     if (this.cells.length === 0 && this.newborns.length === 0) return;
     const cells = this.cells, n = cells.length;
     if (this.xs.length < n) { this.xs = new Float32Array(n * 2); this.ys = new Float32Array(n * 2); }
@@ -206,13 +210,11 @@ export class Life {
     // Crowding cull weights: mean weakness² this tick, so selective culling keeps the overall rate unchanged.
     if (CFG.CULL_SELECTIVE && n > CFG.MAX_CELLS * 0.85) {
       if (CFG.CULL_FAIR) {
-        this.orgWeak.clear();
         for (let i = 0; i < n; i++) {
           const c = cells[i];
           if (!c.bonds.length) continue;
-          let a = this.orgWeak.get(c.org);
-          if (!a) { a = { s: 0, n: 0 }; this.orgWeak.set(c.org, a); }
-          a.s += this.weakness(c); a.n++;
+          const j = this.orgSlot(c);
+          this.WS[j] += this.weakness(c); this.WN[j]++;
         }
       }
       let sw = 0;
@@ -229,19 +231,20 @@ export class Life {
     this.groupByField(V);
     this.runPhase(V, 'share');
     F.chem.set(V.FCHEM); F.organic.set(V.FORG); F.nutrient.set(V.FNUT); F.oxygen.set(V.FOXY);
-    this.swim.clear();
+    this.anySwim = false;
     for (let k = 0; k < n; k++) if (!cells[k].dead) this.live(cells[k]);
     // Colonies swim as one body: the combined thrust moves every cell alike (more mass, slower).
-    if (this.swim.size) {
+    if (this.anySwim) {
       for (let k = 0; k < n; k++) {
         const c = cells[k];
         if (c.dead || c.orgSize <= 1 || c.bonds.length === 0) continue;
-        const a = this.swim.get(c.org);
-        if (!a) continue;
-        const f = 1 / Math.max(1, Math.sqrt(a.m));
-        c.vx += a.x * f; c.vy += a.y * f;
+        const i = this.orgSlot(c);
+        if (!(this.SWM[i] > 0)) continue;
+        const f = 1 / Math.max(1, Math.sqrt(this.SWM[i]));
+        c.vx += this.SWX[i] * f; c.vy += this.SWY[i] * f;
       }
     }
+
     this.interact();
     if (this.w.t % 2 === 0) this.relax();
     this.physics();
@@ -260,9 +263,32 @@ export class Life {
   // How close a cell is to death: drained energy, old age, or an infection that will burst it (0 healthy … 1).
   // Energy is measured against a standard tank for the cell's size (how long it would last), so eukaryotes'
   // larger tanks (2.2x) don't make healthy ones look half-empty.
+  // This tick's index for a cell's colony (c.org) in the per-colony arrays, made on first use.
+  orgSlot(c) {
+    let i = c.oi;
+    if (i >= 0 && i < this.nOi && this.oiOrg[i] === c.org) return i;
+    i = this.oiMap.get(c.org);
+    if (i === undefined) {
+      i = this.nOi++;
+      this.roomOi(i + 1);
+      this.oiMap.set(c.org, i); this.oiOrg[i] = c.org;
+      this.WS[i] = this.WN[i] = this.SWX[i] = this.SWY[i] = this.SWM[i] = this.PPX[i] = this.PPY[i] = this.PPA[i] = 0; this.PPHAS[i] = 0;
+    }
+    c.oi = i;
+    return i;
+  }
+
+  roomOi(n) {
+    if (n <= this.oiOrg.length) return;
+    const cap = Math.max(256, n, this.oiOrg.length * 2), grow = (a, T) => { const b = new T(cap); b.set(a); return b; };
+    this.oiOrg = grow(this.oiOrg, Int32Array);
+    for (const k of ['WS', 'WN', 'SWX', 'SWY', 'SWM', 'PPX', 'PPY', 'PPA']) this[k] = grow(this[k], Float64Array);
+    this.PPHAS = grow(this.PPHAS, Uint8Array);
+  }
+
   // What the crowding cull goes by: with CULL_FAIR, a colony cell counts as its colony's average.
   cullWeakness(c) {
-    if (CFG.CULL_FAIR && c.bonds.length) { const a = this.orgWeak.get(c.org); if (a) return a.s / a.n; }
+    if (CFG.CULL_FAIR && c.bonds.length) { const i = this.orgSlot(c); if (this.WN[i] > 0) return this.WS[i] / this.WN[i]; }
     return this.weakness(c);
   }
   weakness(c) {
@@ -386,17 +412,13 @@ export class Life {
     const mot = c.motil * tm[4] * c.gf;
     // A colony swims as one body (COLONY_SWIM): every cell adds its mass, and its thrust if it swims.
     const col = CFG.COLONY_SWIM && c.orgSize > 1 && c.bonds.length > 0;
-    let a;
-    if (col) {
-      a = this.swim.get(c.org);
-      if (!a) { a = { x: 0, y: 0, m: 0 }; this.swim.set(c.org, a); }
-      a.m += c.m;
-    }
+    let oi = -1;
+    if (col) { oi = this.orgSlot(c); this.SWM[oi] += c.m; this.anySwim = true; }
     if (mot < 0.03) return;
     const V = this.V, f = V.OUTF[s];
     if (f & K.O_SENSED) { c.px = V.PX[s]; c.py = V.PY[s]; c.fx = V.FX[s]; c.fy = V.FY[s]; }
     if (f & K.O_RETHINK) { c.heading = V.HEAD[s] = V.HEADOUT[s]; c.dirX = V.DIRX[s]; c.dirY = V.DIRY[s]; }
-    if (col) { a.x += c.dirX * mot * CFG.MOT_SPEED; a.y += c.dirY * mot * CFG.MOT_SPEED; }
+    if (col) { this.SWX[oi] += c.dirX * mot * CFG.MOT_SPEED; this.SWY[oi] += c.dirY * mot * CFG.MOT_SPEED; }
     else {
       const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
       c.vx += c.dirX * th; c.vy += c.dirY * th;
@@ -666,30 +688,45 @@ export class Life {
   // Move every cell out of the cells it overlaps. With TISSUE_PUSH, the push a colony cell gets from other
   // organisms is shared by its whole colony (by size, like one body): the cell keeps 1 - its adhesion of it.
   applyPushes(R) {
-    const cells = this.cells, n = cells.length, V = this.V, pool = this.pushPool;
-    const share = (c) => (CFG.TISSUE_PUSH && c.orgSize > 1 && c.bonds.length ? (CFG.JUNCTIONS ? Math.min(1, c.adh) : 1) : 0);
-    if (CFG.TISSUE_PUSH) {
-      pool.clear();
+    const cells = this.cells, n = cells.length, V = this.V;
+    if (!CFG.TISSUE_PUSH) {
       for (let k = 0; k < n; k++) {
-        const c = cells[k], f = c.dead ? 0 : share(c);
-        if (!f) continue;
+        const c = cells[k];
+        if (c.dead) continue;
         const s = c.slot;
-        let p = pool.get(c.org);
-        if (!p) { p = { x: 0, y: 0, a: 0 }; pool.set(c.org, p); }
-        p.x += R.FPUSHX[s] * f * c.area; p.y += R.FPUSHY[s] * f * c.area;
+        c.x += R.PUSHX[s]; c.y += R.PUSHY[s]; V.X[s] = c.x; V.Y[s] = c.y;
       }
-      for (let k = 0; k < n; k++) { const c = cells[k]; if (!c.dead && c.orgSize > 1 && c.bonds.length) { const p = pool.get(c.org); if (p) p.a += c.area; } }
+      return;
     }
+    // One pass over the cells to note who shares (and how much, and with which colony), the sums in plain
+    // arrays, then one pass to move them.
+    this.roomOi(this.nOi + n); // (no growing below: the arrays are held)
+    if (!this.pkF || this.pkF.length < n) { const m = Math.ceil(n * 1.5) + 64; this.pkF = new Float64Array(m); this.pkA = new Float64Array(m); this.pkI = new Int32Array(m); }
+    const { PPX, PPY, PPA, PPHAS, pkF, pkA, pkI } = this, junc = CFG.JUNCTIONS;
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (c.dead || !(c.orgSize > 1) || !c.bonds.length) { pkI[k] = -1; continue; }
+      pkI[k] = this.orgSlot(c); pkA[k] = c.area; pkF[k] = junc ? Math.min(1, c.adh) : 1;
+    }
+    const no = this.nOi;
+    PPHAS.fill(0, 0, no); PPX.fill(0, 0, no); PPY.fill(0, 0, no); PPA.fill(0, 0, no);
+    for (let k = 0; k < n; k++) {
+      const i = pkI[k], f = pkF[k];
+      if (i < 0 || !f) continue;
+      const s = cells[k].slot;
+      PPHAS[i] = 1;
+      PPX[i] += R.FPUSHX[s] * f * pkA[k]; PPY[i] += R.FPUSHY[s] * f * pkA[k];
+    }
+    for (let k = 0; k < n; k++) { const i = pkI[k]; if (i >= 0 && PPHAS[i]) PPA[i] += pkA[k]; }
     for (let k = 0; k < n; k++) {
       const c = cells[k];
       if (c.dead) continue;
       const s = c.slot;
       let px = R.PUSHX[s], py = R.PUSHY[s];
-      const f = share(c);
+      const i = pkI[k], f = i >= 0 ? pkF[k] : 0;
       if (f) {
         px -= R.FPUSHX[s] * f; py -= R.FPUSHY[s] * f;
-        const p = pool.get(c.org);
-        if (p && p.a > 0) { px += p.x / p.a; py += p.y / p.a; }
+        if (PPHAS[i] && PPA[i] > 0) { px += PPX[i] / PPA[i]; py += PPY[i] / PPA[i]; }
       }
       c.x += px; c.y += py; V.X[s] = c.x; V.Y[s] = c.y;
     }
