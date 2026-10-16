@@ -59,9 +59,12 @@ function setSpeed(i) {
 }
 function speedLabel() {
   if (live) {
-    const el = $('speed-val'), rate = Math.round(live.tps).toLocaleString();
-    el.textContent = `live · ${rate}/s`;
+    const el = $('speed-val'), rate = Math.round(live.tps).toLocaleString(), c = live.ctl || {};
+    el.textContent = c.paused ? 'live · paused' : c.seeking ? 'live · seeking…' : `live · ${rate}/s${c.tpsLimit ? ` (≤${c.tpsLimit})` : ''}`;
     el.title = `Watching the world running on the server, at about ${rate} ticks per second`;
+    $('btn-play').textContent = c.paused ? 'Play' : 'Pause';
+    $('btn-seek').classList.toggle('active', !!c.seeking);
+    $('btn-max').classList.toggle('active', !c.tpsLimit);
     return;
   }
   const s = curSpeed();
@@ -162,7 +165,7 @@ function frameStep() {
   story.update(dt);
   $('btn-tour').classList.toggle('active', story.active);
   world.beginInterp(alpha);
-  opts.time = world.t - 1 + alpha;
+  opts.time = live ? live.time(now) : world.t - 1 + alpha; // (live: the clock glides between frames too)
   renderer.time = opts.time;
   const sel = ui.selected;
   if (sel) trackSelection(sel);
@@ -191,11 +194,12 @@ function playLabel() {
   $('btn-rew').classList.toggle('active', !!rewinding);
 }
 $('btn-play').onclick = () => {
+  if (live) { liveCtl({ action: live.ctl && live.ctl.paused ? 'play' : 'pause' }); return; }
   if (rewinding) stopRewind(); // pauses
   else running = !running;
   playLabel();
 };
-$('btn-step').onclick = () => { stopRewind(); world.step(); alpha = 1; };
+$('btn-step').onclick = () => { if (live) { liveCtl({ action: 'step', n: 1 }); return; } stopRewind(); world.step(); alpha = 1; };
 $('btn-rew').onclick = () => { if (rewinding) stopRewind(); else startRewind(); };
 
 // ---------------------------------------------------------------- rewind
@@ -330,6 +334,7 @@ function stopSeek() {
   $('btn-seek').classList.remove('active');
 }
 $('btn-seek').onclick = () => {
+  if (live) { liveCtl({ action: 'seek' }); return; }
   if (seeking) { stopSeek(); return; }
   stopRewind();
   if (story.active) return; // the tour's worlds are replays: jumping ahead would leave the scene
@@ -351,6 +356,7 @@ $('file-load').onchange = async (e) => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f) return;
+  if (live) { liveLoad(f); return; } // (replaces the server's world)
   try {
     const w = await loadFromFile(f);
     story.stop(); stopSeek(); stopRewind(); rewind.clear();
@@ -384,8 +390,9 @@ for (const b of document.querySelectorAll('[data-fov]')) {
     if (sel && !sel.gone) { const c = centreOf(sel); renderer.cam.x = c.x; renderer.cam.y = c.y; followOn = sel.follow = true; startFollow(sel); }
   };
 }
-$('speed').oninput = (e) => { maxOn = false; setSpeed(+e.target.value); }; // (moving the slider leaves Max)
-$('btn-max').onclick = () => setMax(!maxOn);
+$('speed').oninput = (e) => { if (live) return; maxOn = false; setSpeed(+e.target.value); }; // (moving the slider leaves Max)
+$('speed').onchange = (e) => { if (live) liveCtl({ action: 'speed', tps: LIVE_TPS[+e.target.value] }); }; // (live: the server's ticks per second)
+$('btn-max').onclick = () => { if (live) liveCtl({ action: 'speed', tps: 0 }); else setMax(!maxOn); };
 // New world: a fresh random world, unless a different seed has been typed in. Enter in the seed box
 // loads exactly that seed (so the current one can be restarted from tick 0).
 const randomSeed = () => Math.floor(Math.random() * 1e6) + 1;
@@ -402,16 +409,19 @@ $('seed').onkeydown = (e) => {
 $('color-mode').onchange = (e) => { opts.colorMode = e.target.value; };
 $('overlay').onchange = (e) => { opts.overlay = e.target.value; };
 $('show-chem').onchange = (e) => { opts.showChem = e.target.checked; };
-$('ev-meteor').onclick = () => { const p = world.meteor(); opts.flash = { x: p.x, y: p.y, a: 1 }; };
-$('ev-snowball').onclick = () => world.snowball();
-$('ev-volcano').onclick = () => world.volcano();
+$('ev-meteor').onclick = async () => {
+  if (live) { const r = await liveCtl({ action: 'event', kind: 'meteor' }); if (r && r.at) opts.flash = { x: r.at.x, y: r.at.y, a: 1 }; return; }
+  const p = world.meteor(); opts.flash = { x: p.x, y: p.y, a: 1 };
+};
+$('ev-snowball').onclick = () => { if (live) liveCtl({ action: 'event', kind: 'snowball' }); else world.snowball(); };
+$('ev-volcano').onclick = () => { if (live) liveCtl({ action: 'event', kind: 'volcano' }); else world.volcano(); };
 $('btn-tree').onclick = () => { $('tree-modal').hidden = false; ui.drawTree(world); };
 $('tree-close').onclick = () => { $('tree-modal').hidden = true; };
 $('tree-modal').onclick = (e) => { if (e.target.id === 'tree-modal') $('tree-modal').hidden = true; };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (live && (e.code === 'Space' || '+=-mMrR'.includes(e.key))) return; // (the server runs the clock)
+  if (live && (e.code === 'Space' || '+=-mMrR'.includes(e.key)) && !(liveAdmin && e.code === 'Space')) return; // (the server runs the clock)
   if (e.code === 'Space') { e.preventDefault(); $('btn-play').click(); }
   else if (e.key === 'Escape') {
     $('tree-modal').hidden = true;
@@ -673,9 +683,6 @@ function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT
 // Console handle for tinkering, e.g. soup.world.life.cells.length
 window.soup = { get world() { return world; }, renderer, ui, opts, story, rewind, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
 
-// Served by the simulation server (sim-server.mjs)? Then watch its world instead of running one here.
-if (await detectLive()) await startLive();
-requestAnimationFrame(loop);
 
 async function startLive() {
   const feed = new LiveFeed();
@@ -684,9 +691,12 @@ async function startLive() {
   live = feed;
   running = false;
   // The server runs the clock: no play, speed, rewind, new worlds, tour or planetary events here.
-  const hide = (el) => { el.style.display = 'none'; };
-  for (const id of ['btn-play', 'btn-rew', 'btn-step', 'btn-seek', 'btn-tour', 'btn-load', 'speed', 'btn-max']) hide($(id));
-  hide($('ev-meteor').closest('section'));
+  for (const id of ['btn-rew', 'btn-tour']) $(id).style.display = 'none';
+  const adm = document.createElement('button');
+  adm.id = 'btn-admin';
+  $('btn-fit').after(adm);
+  adm.onclick = () => (liveAdmin ? lockAdmin() : unlockAdmin(true));
+  showAdmin(false);
   $('btn-save').title = 'Download the server\'s world as it is now (load it in a local copy to explore it at your own pace)';
   $('btn-new').title = 'Restart the server\'s world (everyone watching sees it): needs the server\'s admin key. The old world is archived on the server.';
   $('seed').value = w.seed;
@@ -698,13 +708,15 @@ async function startLive() {
   $('scale-note').after(note);
   liveNote();
   await feed.frame(world).catch(() => {});
+  unlockAdmin(false); // (with a key remembered in this browser)
   speedLabel();
   // About once a second a new frame; now and then a full snapshot (genomes of cells born meanwhile).
   const pump = async () => {
     const t0 = performance.now();
     try {
-      if (t0 - feed.lastFull > FULL_EVERY) swapWorld(await feed.full(), selSpec(ui.selected));
-      if ((await feed.frame(world)) === 'reset') liveReset(await feed.full()); // (the server started a new world)
+      let reset = t0 - feed.lastFull > FULL_EVERY && (await feed.refresh(world)) === 'reset';
+      if (!reset) reset = (await feed.frame(world)) === 'reset';
+      if (reset) liveReset(await feed.full()); // (the server started a new world)
     } catch { /* the server may be restarting: try again shortly */ }
     setTimeout(pump, Math.max(200, 1000 - (performance.now() - t0)));
   };
@@ -717,22 +729,62 @@ function liveReset(w) {
   liveNote();
 }
 
-// New world on the server: everyone watching gets it, so it needs the admin key (ADMIN_KEY on the server),
-// asked for once and remembered in this browser.
+// Admin controls (with the server's ADMIN_KEY): the clock, events, new and loaded worlds act on the world
+// everyone is watching. The key is asked for once and remembered in this browser.
 const KEY_STORE = 'primordial-soup-admin-key';
-async function liveNewWorld(s) {
-  let key = null;
-  try { key = localStorage.getItem(KEY_STORE); } catch { /* storage may be unavailable */ }
-  if (!key) key = prompt(`Restart the server's world as seed ${s}? Everyone watching will see the new one (the old one is archived on the server).\n\nAdmin key (ADMIN_KEY on the server):`);
-  if (!key) return;
+const LIVE_TPS = [1, 2, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 1000]; // ticks/s for the slider's 14 steps
+let liveAdmin = false;
+const storedKey = () => { try { return localStorage.getItem(KEY_STORE); } catch { return null; } };
+const storeKey = (k) => { try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); } catch { /* unavailable */ } };
+function showAdmin(on) {
+  liveAdmin = on;
+  const show = (el) => { el.style.display = on ? '' : 'none'; };
+  for (const id of ['btn-play', 'btn-step', 'btn-seek', 'btn-load', 'speed', 'btn-max']) show($(id));
+  show($('seed').closest('.row'));
+  show($('ev-meteor').closest('section'));
+  const b = $('btn-admin');
+  b.textContent = on ? '🔒 Lock' : '🔑 Admin';
+  b.title = on ? 'Hide the admin controls and forget the key in this browser' : 'Unlock the controls for the server\'s world (needs its ADMIN_KEY)';
+  if (on) speedLabel();
+}
+async function adminPost(url, body, type = 'application/json') {
+  const key = storedKey();
+  if (!key) { showAdmin(false); return null; }
   let r = null;
-  try { r = await fetch('/api/new-world', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }, body: JSON.stringify({ seed: s }) }); } catch { /* unreachable */ }
+  try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': type, 'X-Admin-Key': key }, body }); } catch { /* unreachable */ }
   if (!r || !r.ok) {
-    if (r && r.status === 403) { try { localStorage.removeItem(KEY_STORE); } catch { /* ignore */ } }
-    ui.toast(`New world refused: ${r ? await r.text() : 'the server could not be reached'}`, world.t);
-    return;
+    const msg = r ? await r.text() : 'the server could not be reached';
+    if (r && r.status === 403) lockAdmin();
+    ui.toast(`Refused: ${msg}`, world.t);
+    return null;
   }
-  try { localStorage.setItem(KEY_STORE, key); } catch { /* ignore */ }
+  return r.json();
+}
+async function unlockAdmin(ask) {
+  let key = storedKey();
+  if (!key && ask) key = prompt('Admin key for this server (its ADMIN_KEY):');
+  if (!key) return;
+  storeKey(key);
+  if (await adminPost('/api/admin-check', '{}')) { showAdmin(true); if (ask) ui.toast('Admin controls unlocked: they act on the world everyone sees', world.t); }
+}
+function lockAdmin() { storeKey(null); showAdmin(false); }
+const liveCtl = (c) => adminPost('/api/control', JSON.stringify(c));
+async function liveNewWorld(s) {
+  if (!liveAdmin) { await unlockAdmin(true); if (!liveAdmin) return; }
+  if (!confirm(`Restart the server's world as seed ${s}? Everyone watching gets the new one (the old one is archived on the server).`)) return;
+  if (!(await adminPost('/api/new-world', JSON.stringify({ seed: s })))) return;
   liveReset(await live.full());
   ui.toast(`New world on the server: seed ${seed}`, world.t);
 }
+async function liveLoad(file) {
+  if (!confirm(`Replace the server's world with ${file.name}? Everyone watching gets it (the current one is archived on the server).`)) return;
+  ui.toast('Uploading…', world.t);
+  const r = await adminPost('/api/load', await file.arrayBuffer(), 'application/octet-stream');
+  if (!r) return;
+  liveReset(await live.full());
+  ui.toast(`Loaded on the server: seed ${r.seed} at tick ${r.t.toLocaleString()}`, world.t);
+}
+
+// Served by the simulation server (sim-server.mjs)? Then watch its world instead of running one here.
+if (await detectLive()) await startLive();
+requestAnimationFrame(loop);

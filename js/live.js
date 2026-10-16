@@ -4,9 +4,9 @@
 // second; see liveframe.js), drawing everything gliding between the last two frames.
 import { deserialize } from './persist.js';
 import { setCfg } from './config.js';
-import { applyFrame } from './liveframe.js';
+import { applyFrame, mergeFull } from './liveframe.js';
 
-export const FULL_EVERY = 60000; // ms between full snapshots (genomes and species for cells born meanwhile)
+export const FULL_EVERY = 60000; // ms between full snapshots (true genomes and species for cells born meanwhile)
 
 export async function detectLive() {
   try {
@@ -26,6 +26,9 @@ export class LiveFeed {
     this.tps = 0;                     // the server's ticks per second
     this._t = null;
     this.seed = null;               // the world the frames should belong to
+    this.t0 = 0;                     // the clock glides from t0 (where it was drawn) to the latest frame's tick
+    this.approx = new Set();         // cells drawn from a stand-in genome until the next full snapshot
+    this.ctl = null;                 // the server's clock state (paused, speed limit, seeking)
   }
 
   // The server's whole world, with its settings.
@@ -38,8 +41,21 @@ export class LiveFeed {
     w.smooth = true;
     w.soupAlpha = (a) => a; // (molecules glide between frames like everything else)
     this.lastFull = performance.now();
-    this.seed = w.seed; this._t = w.t;
+    this.seed = w.seed; this._t = w.t; this.t0 = w.t;
+    this.approx.clear();
     return w;
+  }
+
+  // Now and then: the true genomes of cells born since the last snapshot, and the species, merged into the
+  // world on screen (rebuilding it would redraw everything slightly differently). 'reset' if it's a new world.
+  async refresh(w) {
+    const r = await fetch('/api/full', { cache: 'no-store' });
+    if (!r.ok) return false;
+    const d = await r.json();
+    this.lastFull = performance.now();
+    if (d.seed !== w.seed) return 'reset';
+    mergeFull(w, d, this.approx);
+    return true;
   }
 
   // Update the world from the latest frame. Returns false if there was nothing new, and 'reset' if the frame is
@@ -56,13 +72,18 @@ export class LiveFeed {
       this.interval = Math.max(300, Math.min(4000, this.interval * 0.7 + gap * 0.3));
       this.tps = ((f.t - this._t) * 1000) / gap;
     }
+    const a = this.alpha(now);
+    this.t0 = this.time(now); // (keep the clock where it is drawn)
     this._t = f.t;
     this.seq = f.seq;
-    applyFrame(w, f);
+    this.ctl = f.ctl || null;
+    applyFrame(w, f, a, this.approx);
     this.arrived = now;
     return true;
   }
 
   // How far between the previous frame and the latest one to draw (0 … 1).
   alpha(now) { return Math.min(1, (now - this.arrived) / this.interval); }
+  // The tick to draw at (animations follow it), gliding like the positions.
+  time(now) { return this._t === null ? 0 : this.t0 + (this._t - this.t0) * this.alpha(now); }
 }

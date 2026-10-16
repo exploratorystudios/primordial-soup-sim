@@ -4,6 +4,7 @@
 // state, the viruses, the molecule soup, the census and records) but not genomes: a cell born since the last
 // full snapshot is drawn from its parent's genome (or its species') until the next one.
 import { Cell, decode } from './life.js';
+import * as Gn from './genome.js';
 import { CFG } from './config.js';
 
 function b64(arr) {
@@ -82,9 +83,13 @@ export function buildFrame(w, seq, withFields) {
   };
 }
 
-// Page: bring the world up to date with a frame. Everything keeps its previous position as where it is drawn
-// from (x0, y0), so motion glides from the last frame to this one over the next second.
-export function applyFrame(w, f) {
+// Page: bring the world up to date with a frame. a is how far the view had glided toward the last frame (0 … 1):
+// everything starts its next glide from where it is drawn right now, so nothing jumps when a frame comes early or
+// late. Molecules, protocells, cells and viruses stay the same objects from frame to frame (the renderer keeps
+// per-object details on them, like where a strand sits inside its protocell). approx collects the cells drawn from
+// a stand-in genome (born since the last full snapshot), for mergeFull to put right.
+export function applyFrame(w, f, a = 1, approx = null) {
+  const shown = (o) => { if (o.x0 === undefined) return; o.x0 += (o.x - o.x0) * a; o.y0 += (o.y - o.y0) * a; };
   w.t = f.t;
   Object.assign(w, f.env);
   w.milestones = f.record.milestones;
@@ -92,11 +97,12 @@ export function applyFrame(w, f) {
   w.logs = f.record.logs; w.history = f.record.history; w.historyEvery = f.record.historyEvery;
   if (f.fields) for (const k of ['chem', 'organic', 'oxygen', 'nutrient']) w.fields[k].set(unb64(f.fields[k], Float32Array));
 
-  // Molecules: glide from where the same molecule (by id) was in the last frame.
+  // Free molecules (plain arrays, matched by id).
   const soup = w.soup, S = f.soup;
   const prevM = new Map();
   for (let i = 0; i < soup.n; i++) prevM.set(soup.mid[i], i);
-  const pmx = soup.mx.slice(0, soup.n), pmy = soup.my.slice(0, soup.n);
+  const pmx = new Float32Array(soup.n), pmy = new Float32Array(soup.n);
+  for (let i = 0; i < soup.n; i++) { pmx[i] = soup.px0[i] + (soup.mx[i] - soup.px0[i]) * a; pmy[i] = soup.py0[i] + (soup.my[i] - soup.py0[i]) * a; }
   soup.n = S.n;
   soup.mx.set(unb64(S.mx, Float32Array)); soup.my.set(unb64(S.my, Float32Array));
   soup.mt.set(unb64(S.mt, Uint8Array)); soup.mid.set(unb64(S.mid, Int32Array));
@@ -106,43 +112,54 @@ export function applyFrame(w, f) {
   }
   soup.mdead.fill(0);
   soup.stats = S.stats;
+  // Strands and protocells.
   const oldP = new Map(); for (const p of soup.polymers) oldP.set(p.id, p);
   for (const v of soup.vesicles) for (const p of v.polys) oldP.set(p.id, p);
   const polyIn = (q) => {
-    const o = oldP.get(q.id);
-    const p = { id: q.id, x: q.x, y: q.y, ang: q.ang, seq: q.seq, act: 0, fid: 0.8, stab: 0, prog: q.prog, copy: q.copy, dead: false };
-    soup.evalPolymer(p);
-    p.x0 = o ? o.x : p.x; p.y0 = o ? o.y : p.y; p.a0 = o ? o.ang : p.ang;
+    let p = oldP.get(q.id);
+    if (p) {
+      if (p.a0 !== undefined) p.a0 += (p.ang - p.a0) * a;
+      shown(p);
+      const reseq = p.seq !== q.seq;
+      p.x = q.x; p.y = q.y; p.ang = q.ang; p.prog = q.prog; p.copy = q.copy; p.dead = false;
+      if (reseq) { p.seq = q.seq; soup.evalPolymer(p); }
+    } else {
+      p = { id: q.id, x: q.x, y: q.y, ang: q.ang, seq: q.seq, act: 0, fid: 0.8, stab: 0, prog: q.prog, copy: q.copy, dead: false };
+      soup.evalPolymer(p);
+      p.x0 = p.x; p.y0 = p.y; p.a0 = p.ang;
+    }
+    p.home = undefined;
     return p;
   };
   const oldV = new Map(); for (const v of soup.vesicles) oldV.set(v.id, v);
   soup.polymers = S.polymers.map(polyIn);
   const vesId = soup.vesId;
   soup.vesicles = S.vesicles.map((q) => {
-    const o = oldV.get(q.id);
-    const v = { ...soup.makeVesicle(q.x, q.y, q.L, q.gen), id: q.id, copies: q.copies, age: q.age, pool: q.pool, polys: q.polys.map(polyIn) };
-    v.x0 = o ? o.x : v.x; v.y0 = o ? o.y : v.y;
+    let v = oldV.get(q.id);
+    if (v) { shown(v); v.x = q.x; v.y = q.y; v.L = q.L; v.r = 2.5 + Math.sqrt(q.L) * 1.25; v.gen = q.gen; v.dead = false; }
+    else { v = { ...soup.makeVesicle(q.x, q.y, q.L, q.gen), id: q.id }; v.x0 = v.x; v.y0 = v.y; }
+    v.copies = q.copies; v.age = q.age; v.pool = q.pool; v.polys = q.polys.map(polyIn);
+    for (const p of v.polys) p.home = v;
     return v;
   });
   soup.vesId = vesId;
-  for (const v of soup.vesicles) for (const p of v.polys) p.home = v;
 
   // Cells: update the ones we know, make the newborns (from their parent's or species' genome), drop the dead.
   const L = w.life, D = f.life;
   Object.assign(L, { stats: D.stats, births: D.births, deaths: D.deaths, sexualBirths: D.sexualBirths, nextId: D.nextId, nextSpecies: D.nextSpecies, origins: D.origins });
   L.organisms = D.organisms;
   const old = new Map();
-  for (const c of L.cells) old.set(c.id, c);
+  for (const c of L.cells) { old.set(c.id, c); shown(c); } // (x0 is now where it is drawn)
   const A = (k, T) => unb64(D[k], T);
   const id = A('id', Int32Array), parent = A('parent', Int32Array), species = A('species', Int32Array), org = A('org', Int32Array), orgSize = A('orgSize', Int32Array), gen = A('gen', Int32Array);
   const x = A('x', Float32Array), y = A('y', Float32Array), r = A('r', Float32Array), age = A('age', Float32Array), energy = A('energy', Uint16Array), heading = A('heading', Uint8Array);
   const type = A('type', Uint8Array), flags = A('flags', Uint8Array), bondStart = A('bondStart', Int32Array), bonds = A('bonds', Int32Array);
-  const cells = new Array(D.n), byId = new Map();
+  const cells = new Array(D.n), byId = new Map(), oldAll = new Map(old);
   for (let i = 0; i < D.n; i++) {
     let c = old.get(id[i]);
-    if (c) { old.delete(id[i]); c.x0 = c.x; c.y0 = c.y; }
+    if (c) old.delete(id[i]);
     else {
-      const p = byId.get(parent[i]) || old.get(parent[i]) || null;
+      const p = byId.get(parent[i]) || oldAll.get(parent[i]) || null;
       const sp = L.species.get(species[i]);
       const g = p ? p.g : sp ? sp.rep : null;
       if (!g) continue; // (nothing to draw it from until the next full snapshot)
@@ -150,10 +167,12 @@ export function applyFrame(w, f) {
       c.parentId = parent[i]; c.species = species[i]; c.origin = p ? p.origin : 0;
       c.mito = !!(flags[i] & F_MITO); c.plastid = !!(flags[i] & F_PLASTID);
       decode(c);
-      c.x0 = p ? p.x : x[i]; c.y0 = p ? p.y : y[i];
+      // Born out of its parent: start from where the parent is drawn.
+      c.x0 = p ? p.x0 : x[i]; c.y0 = p ? p.y0 : y[i];
+      if (approx) approx.add(c.id);
     }
     c.x = x[i]; c.y = y[i]; c.age = age[i]; c.gen = gen[i]; c.heading = (heading[i] / 256) * TURN;
-    if (c.r !== r[i]) { c.r = r[i]; c.area = (c.r / 2) * (c.r / 2); c.m = Math.pow(c.area, 0.75); c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1); }
+    setRadius(c, r[i]);
     c.energy = (energy[i] / 65535) * c.cap;
     c.type = type[i]; c.org = org[i]; c.orgSize = orgSize[i];
     c.infected = flags[i] & F_INFECTED ? c.infected || { t: f.t, since: f.t } : null;
@@ -161,7 +180,7 @@ export function applyFrame(w, f) {
     c.dead = false;
     cells[i] = c; byId.set(c.id, c);
   }
-  for (const c of old.values()) c.dead = true; // (so a selection of it shows it gone)
+  for (const c of old.values()) { c.dead = true; if (approx) approx.delete(c.id); } // (a selection of it shows it gone)
   L.cells = cells.filter(Boolean);
   for (let i = 0; i < D.n; i++) {
     const c = cells[i];
@@ -171,20 +190,48 @@ export function applyFrame(w, f) {
     c.bonds = list;
   }
 
-  // Viruses: glide from their last position too.
+  // Viruses (the same objects too).
   const V = f.viruses, B = (k, T) => unb64(V[k], T);
   const vid = B('id', Int32Array), vx = B('x', Float32Array), vy = B('y', Float32Array), vk1 = B('k1', Uint16Array), vk2 = B('k2', Uint16Array);
   const vlin = B('lineage', Int32Array), vage = B('age', Int32Array), vang = B('ang', Uint8Array), veuk = B('euk', Uint8Array), vci = B('ci', Int16Array), vcv = B('cv', Float32Array);
   const oldVir = new Map(); for (const v of w.viruses.list) oldVir.set(v.id, v);
   const list = new Array(V.n);
   for (let i = 0; i < V.n; i++) {
-    const o = oldVir.get(vid[i]);
-    const v = { id: vid[i], x: vx[i], y: vy[i], x0: o ? o.x : vx[i], y0: o ? o.y : vy[i], k1: vk1[i] / 65535, k2: vk2[i] / 65535, lineage: vlin[i],
-      cargo: vci[i] >= 0 ? { i: vci[i], v: vcv[i] } : null, age: vage[i], ang: (vang[i] / 256) * TURN };
+    let v = oldVir.get(vid[i]);
+    if (v) shown(v); else v = { id: vid[i], x0: vx[i], y0: vy[i] };
+    v.x = vx[i]; v.y = vy[i]; v.k1 = vk1[i] / 65535; v.k2 = vk2[i] / 65535; v.lineage = vlin[i];
+    v.cargo = vci[i] >= 0 ? { i: vci[i], v: vcv[i] } : null; v.age = vage[i]; v.ang = (vang[i] / 256) * TURN;
     if (V.domain) v.euk = veuk[i] === 1;
     list[i] = v;
   }
   w.viruses.list = list;
   Object.assign(w.viruses, { nextId: V.nextId, lineages: V.lineages, stats: V.stats });
   w.smooth = true;
+}
+
+// The frame's radius, and what scales with it.
+function setRadius(c, r) {
+  if (c.r === r) return;
+  c.r = r; c.area = (r / 2) * (r / 2); c.m = Math.pow(c.area, 0.75); c.cap = CFG.CAP_K * c.m * (c.mito ? 2.2 : 1);
+}
+
+// Page: a full snapshot puts right what frames can't carry, without rebuilding the world (which would redraw
+// everything slightly differently): the species, and the true genomes of cells drawn from a stand-in.
+export function mergeFull(w, d, approx) {
+  const L = w.life;
+  L.species = new Map(d.life.species.map((s) => [s.id, { ...s, rep: Gn.fitGenome(unb64(s.rep, Float32Array), s.id) }]));
+  const byId = new Map(d.life.cells.map((q) => [q.id, q]));
+  const alive = new Set(L.cells.map((c) => c.id));
+  for (const c of L.cells) {
+    if (!approx.has(c.id)) continue;
+    const q = byId.get(c.id);
+    if (!q) continue;
+    const r = c.r;
+    c.g = Gn.fitGenome(unb64(q.g, Float32Array), c.id);
+    c.origin = q.origin; c.founderSeq = q.founderSeq;
+    decode(c);
+    c.r = NaN; setRadius(c, r); // (keep its drawn size)
+    approx.delete(c.id);
+  }
+  for (const id of approx) if (!alive.has(id)) approx.delete(id);
 }
