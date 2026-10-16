@@ -4,6 +4,8 @@
 //
 // To keep precision at extreme zoom (~10^5×) everything is drawn relative to the camera.
 import { CFG } from './config.js';
+import { GLCells } from './glcells.js';
+import { HUE as HUE_GENE } from './genome.js';
 import { LIPID, BASES } from './chemistry.js';
 import { RNG } from './rng.js';
 import { maturity, phospholipidShare, peptides, protoRibosome, magnesiumCount, aaColor, rand01 } from './protocell.js';
@@ -32,6 +34,14 @@ export const DIM = {
 
 export const MONO_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#efe6c4'];
 export const TYPE_COLORS = ['#9aa7b8', '#5fd16b', '#4fd2ff', '#ff5d6c', '#c79a5b', '#ffd23f'];
+// The same colours as numbers 0 … 1 (for the GPU), and the colour of a free cell in 'type' mode.
+const hexRGB = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+const TYPE_RGB = TYPE_COLORS.map(hexRGB), TYPE_RGB_FREE = hexRGB('#5d6878');
+// hsl(h, s, l) as the browser computes it, into out (0 … 1).
+function hslRGB(h, s, l, out) {
+  const a = s * Math.min(l, 1 - l), f = (n) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  out[0] = f(0); out[1] = f(8); out[2] = f(4);
+}
 const OVERLAY = {
   chem: { rgb: [255, 140, 40], ref: 8 },
   organic: { rgb: [190, 120, 255], ref: 4 },
@@ -73,9 +83,25 @@ export function scaleName(fieldNm) {
 }
 
 export class Renderer {
-  constructor(canvas) {
+  // opts.gl: draw cells on the GPU when they're small on screen (see glcells.js; falls back to 2D without WebGL2).
+  constructor(canvas, opts = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    this.main = this.ctx;
+    this.glc = opts.gl ? GLCells.create() : null;
+    // With the GPU, three layers on screen, so nothing has to be copied back from the GPU: this canvas (the
+    // background and chemistry), the GPU's canvas (cells) and a clear canvas on top (all that's drawn above
+    // cells). They sit exactly over this one and let the mouse through to it.
+    if (this.glc) {
+      const top = document.createElement('canvas');
+      for (const c of [this.glc.canvas, top]) {
+        Object.assign(c.style, { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%', pointerEvents: 'none', visibility: 'hidden' });
+      }
+      canvas.after(this.glc.canvas);
+      this.glc.canvas.after(top);
+      this.topCanvas = top; this.top = top.getContext('2d');
+      this.layered = false;
+    }
     this.cam = { x: CFG.W / 2, y: CFG.H / 2, zoom: 1 };
     this.off = document.createElement('canvas');
     this.overlayKey = null;
@@ -92,6 +118,7 @@ export class Renderer {
     this.dpr = dpr;
     this.canvas.width = Math.max(1, Math.round(r.width * dpr));
     this.canvas.height = Math.max(1, Math.round(r.height * dpr));
+    if (this.topCanvas) { this.topCanvas.width = this.canvas.width; this.topCanvas.height = this.canvas.height; }
     this.base = Math.min(this.canvas.width / CFG.W, this.canvas.height / CFG.H);
   }
 
@@ -151,6 +178,7 @@ export class Renderer {
   // ------------------------------------------------------------------- frame
   draw(world, opts) {
     if (this.lost) return;
+    this.ctx = this.main; // (always start on the bottom layer)
     const ctx = this.ctx, cv = this.canvas, cw = cv.width, ch = cv.height;
     const ppu = this.ppu, cx = this.cam.x, cy = this.cam.y;
     this.frame++;
@@ -241,7 +269,17 @@ export class Renderer {
     const fading = [];
     for (const e of this.fxNow) if (e.type === 'abio' && !e.cell.dead) { e.cell._fade = smooth01(0.5, 0.8, e.u); fading.push(e.cell); }
     this.drawFxUnder();
-    this.drawLife(world, opts);
+    // Small cells on the GPU (its own layer); then everything above them on the clear top layer.
+    const layered = this.glUsable(world);
+    this.showLayers(layered);
+    if (layered) {
+      this.drawCellsGL(world, opts);
+      this.top.setTransform(1, 0, 0, 1, 0, 0);
+      this.top.clearRect(0, 0, cw, ch);
+      this.top.setTransform(this.main.getTransform());
+      this.ctx = this.top;
+      this.drawBonds(world.life.cells);
+    } else this.drawLife(world, opts);
     this.drawViruses(world);
     this.drawFx(world);
     for (const c of fading) c._fade = undefined;
@@ -251,11 +289,21 @@ export class Renderer {
     if (opts.selection) this.drawSelection(opts.selection);
     else if (opts.selected) this.drawSelection(opts.selected);
     if (opts.flash) {
-      const f = opts.flash;
-      ctx.fillStyle = `rgba(255,160,60,${f.a * 0.5})`;
-      ctx.beginPath(); ctx.arc(f.x - cx, f.y - cy, 350 * (1.2 - f.a), 0, TAU); ctx.fill();
+      const f = opts.flash, c2 = this.ctx;
+      c2.fillStyle = `rgba(255,160,60,${f.a * 0.5})`;
+      c2.beginPath(); c2.arc(f.x - cx, f.y - cy, 350 * (1.2 - f.a), 0, TAU); c2.fill();
     }
     this.drawScaleBar();
+    this.ctx = this.main;
+  }
+
+  // Show the GPU and top layers only while they're in use (and leave nothing stale on them when not).
+  showLayers(on) {
+    if (!this.glc || on === this.layered) return;
+    this.layered = on;
+    const vis = on ? 'visible' : 'hidden';
+    this.glc.canvas.style.visibility = vis; this.topCanvas.style.visibility = vis;
+    if (!on) { this.top.setTransform(1, 0, 0, 1, 0, 0); this.top.clearRect(0, 0, this.topCanvas.width, this.topCanvas.height); }
   }
 
   // At molecular zoom the ocean is visibly made of water molecules (~0.3 nm apart), jiggling
@@ -1239,6 +1287,53 @@ export class Renderer {
     if (mode === 'species') return c.hueColor;
     if (mode === 'type') return c.orgSize > 1 ? TYPE_COLORS[c.type] : '#5d6878';
     return c.trophColor;
+  }
+
+  // The GPU can draw the cells when none is big enough on screen for its interior, membrane or wall in detail.
+  glUsable(world) {
+    if (!this.glc || DIM.bilayer * this.pxnm >= 1.5 || this.pxnm >= 1.5) return false;
+    let maxR = 0;
+    for (const c of world.life.cells) if (c.r > maxR) maxR = c.r;
+    return maxR * this.ppu <= 14;
+  }
+  cellRGB(c, mode, out) {
+    if (mode === 'species') { hslRGB(c.g[HUE_GENE] * 360, 0.75, 0.6, out); return out; }
+    if (mode === 'type') { const t = c.orgSize > 1 ? TYPE_RGB[c.type] : TYPE_RGB_FREE; out[0] = t[0]; out[1] = t[1]; out[2] = t[2]; return out; }
+    out[0] = c.colR / 255; out[1] = c.colG / 255; out[2] = c.colB / 255;
+    return out;
+  }
+
+  // drawLife's cells and flagella, on the GPU (the same things drawCell and drawFlagellum draw at these sizes).
+  drawCellsGL(world, opts) {
+    const g = this.glc, cells = world.life.cells, ppu = this.ppu, cv = this.canvas, px = this.px;
+    const ox = cv.width / 2 - this.cam.x * ppu, oy = cv.height / 2 - this.cam.y * ppu; // world → device pixels
+    const focus = opts.focusOrg || 0, mode = opts.colorMode, rgb = [0, 0, 0];
+    g.begin(cv.width, cv.height);
+    for (const c of cells) {
+      if (c._fade !== undefined && c._fade < 1) continue;
+      if (c.motil > 0.3 && c.r * ppu > 2 && this.inView(c.x, c.y, c.r * 6)) {
+        const a = 0.4 * (focus && c.org !== focus ? 0.15 : 1), p = flagellumPath(c, this.time);
+        for (let k = 1; k < p.length; k++) g.segment(ox + p[k - 1].x * ppu, oy + p[k - 1].y * ppu, ox + p[k].x * ppu, oy + p[k].y * ppu, a);
+      }
+    }
+    for (const c of cells) {
+      if (!this.inView(c.x, c.y, c.r * 6)) continue;
+      const fade = c._fade !== undefined && c._fade < 0.999 ? Math.max(0, c._fade) : 1;
+      const X = ox + c.x * ppu, Y = oy + c.y * ppu, rp = c.r * ppu;
+      this.cellRGB(c, mode, rgb);
+      const dim = focus && c.org !== focus;
+      if (rp < 1.2) { g.cell(X, Y, 1, 1, rgb[0], rgb[1], rgb[2], dim ? 0.2 : 1, 0, 0, 0, 0, 0, 1, fade); continue; }
+      if (dim) { g.cell(X, Y, rp, rp + 1.5, rgb[0], rgb[1], rgb[2], 0.16, 0, 0, 0, 0, 0, 0, fade); continue; }
+      const fill = 0.35 + 0.65 * Math.max(0.15, Math.min(1, c.energy / c.cap));
+      const A = c._dividing ? 0 : rp > 14 ? Math.max(0.85, fill) : fill;
+      const armor = c.armor * (c.type === 4 ? 3 : 1);
+      let wallR = 0, wallW = 0, lw = 0, la = 0;
+      if (armor > 0.15) { const wall = (20 + armor * 80) * NM; wallW = Math.max(wall, px) * ppu; wallR = (c.r + wall / 2) * ppu; }
+      if (!c._dividing && (rp > 3 || c.mito)) { lw = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8)) * ppu; la = c.mito ? 0.75 : 0.3; }
+      const ext = Math.max(rp + lw / 2, wallR + wallW / 2) + 1.5;
+      g.cell(X, Y, rp, ext, rgb[0], rgb[1], rgb[2], A, c.mito && rp > 3 ? 1 : 0, wallR, wallW, lw, la, 0, fade);
+    }
+    g.end();
   }
 
   drawLife(world, opts) {

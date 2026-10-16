@@ -16,7 +16,9 @@ const SPEEDS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 250]
 const $ = (id) => document.getElementById(id);
 
 const canvas = $('world');
-const renderer = new Renderer(canvas);
+// ?gl=1 draws small cells on the GPU (glcells.js). Off by default: it halves drawing time, but in Chrome on Linux
+// with a software 2D canvas the WebGL layer made the page stall for about a second at a time at high speeds.
+const renderer = new Renderer(canvas, { gl: new URLSearchParams(location.search).get('gl') === '1' });
 const ui = new UI();
 const opts = { colorMode: 'troph', overlay: 'none', showChem: true, selected: null, flash: null };
 
