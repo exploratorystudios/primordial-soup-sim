@@ -8,6 +8,7 @@ import { Cell } from './life.js';
 import { Story } from './story.js';
 import { Rewind } from './rewind.js';
 import { saveToFile, loadFromFile } from './persist.js';
+import { detectLive, LiveFeed, FULL_EVERY } from './live.js';
 
 // Ticks per frame. Below 1 the view interpolates between ticks. Max runs the simulation as fast as
 // the CPU allows, giving it most of each frame (a choppier view in exchange for more ticks).
@@ -37,6 +38,7 @@ let speedIdx = SPEEDS.indexOf(5);
 let maxOn = false; // the Max toggle: as fast as the CPU allows (the slider keeps its setting for when it's off)
 const curSpeed = () => (maxOn ? Infinity : SPEEDS[speedIdx]);
 let frame = 0;
+let live = null; // a LiveFeed while watching a world that runs on the server (see live.js)
 let acc = 0;
 let alpha = 1; // how far between the previous and current tick to draw (smoothing at slow speeds)
 
@@ -56,6 +58,12 @@ function setSpeed(i) {
   speedLabel();
 }
 function speedLabel() {
+  if (live) {
+    const el = $('speed-val'), rate = Math.round(live.tps).toLocaleString();
+    el.textContent = `live · ${rate}/s`;
+    el.title = `Watching the world running on the server, at about ${rate} ticks per second`;
+    return;
+  }
   const s = curSpeed();
   $('btn-max').classList.toggle('active', maxOn);
   const set = s === Infinity ? 'max' : s < 1 ? `1 tick/${Math.round(1 / s)} fr` : `${s}/frame`;
@@ -121,7 +129,11 @@ function frameStep() {
   frame++;
   const now = performance.now(), dt = Math.min(0.1, (now - lastNow) / 1000);
   lastNow = now;
-  if (seeking) {
+  if (live) {
+    // Watching the server's world: draw it gliding from the previous frame to the latest one.
+    alpha = live.alpha(now);
+    world.smooth = true;
+  } else if (seeking) {
     // Full speed (within the frame budget) until something new happens.
     const t0 = performance.now();
     while (performance.now() - t0 < 40) {
@@ -330,6 +342,7 @@ $('btn-tour').onclick = () => {
   story.start(seed);
 };
 $('btn-save').onclick = async () => {
+  if (live) { location.href = '/api/save'; return; } // (the server's exact world, not this page's copy)
   const bytes = await saveToFile(world);
   ui.toast(`World saved (${(bytes / 1e6).toFixed(1)} MB)`, world.t);
 };
@@ -393,6 +406,7 @@ $('tree-modal').onclick = (e) => { if (e.target.id === 'tree-modal') $('tree-mod
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (live && (e.code === 'Space' || '+=-mMrR'.includes(e.key))) return; // (the server runs the clock)
   if (e.code === 'Space') { e.preventDefault(); $('btn-play').click(); }
   else if (e.key === 'Escape') {
     $('tree-modal').hidden = true;
@@ -654,4 +668,38 @@ function polymerRadius(q) { return (q.seq.length * DIM.ntRise) / 2 / NM_PER_UNIT
 // Console handle for tinkering, e.g. soup.world.life.cells.length
 window.soup = { get world() { return world; }, renderer, ui, opts, story, rewind, frame: frameStep, draw: () => { renderer.draw(world, opts); ui.update(world, 0); } };
 
+// Served by the simulation server (sim-server.mjs)? Then watch its world instead of running one here.
+if (await detectLive()) await startLive();
 requestAnimationFrame(loop);
+
+async function startLive() {
+  const feed = new LiveFeed();
+  let w;
+  try { w = await feed.full(); } catch (err) { ui.toast(`Could not load the live world (${err.message}); running one here instead`, world.t); return; }
+  live = feed;
+  running = false;
+  // The server runs the clock: no play, speed, rewind, new worlds, tour or planetary events here.
+  const hide = (el) => { el.style.display = 'none'; };
+  for (const id of ['btn-play', 'btn-rew', 'btn-step', 'btn-seek', 'btn-tour', 'btn-load', 'speed', 'btn-max']) hide($(id));
+  hide($('seed').closest('.row'));
+  hide($('ev-meteor').closest('section'));
+  $('btn-save').title = 'Download the server\'s world as it is now (load it in a local copy to explore it at your own pace)';
+  world = w; seed = w.seed;
+  ui.reset(); ui.seenLogs = w.logs.length; opts.selected = null;
+  const note = document.createElement('p');
+  note.className = 'cfg-note';
+  note.textContent = `Live: you're watching a world that runs on the server (seed ${w.seed}). It keeps evolving when nobody is watching.`;
+  $('scale-note').after(note);
+  await feed.frame(world).catch(() => {});
+  speedLabel();
+  // About once a second a new frame; now and then a full snapshot (genomes of cells born meanwhile).
+  const pump = async () => {
+    const t0 = performance.now();
+    try {
+      if (t0 - feed.lastFull > FULL_EVERY) swapWorld(await feed.full(), selSpec(ui.selected));
+      await feed.frame(world);
+    } catch { /* the server may be restarting: try again shortly */ }
+    setTimeout(pump, Math.max(200, 1000 - (performance.now() - t0)));
+  };
+  setTimeout(pump, 1000);
+}

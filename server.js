@@ -10,6 +10,8 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
+  // (The page asks whether it's watching a world on a simulation server; this one serves the page only.)
+  if (url === '/api/status') { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end('{"live":false}'); return; }
   const file = path.normalize(path.join(root, url === '/' ? 'index.html' : url));
   if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {
