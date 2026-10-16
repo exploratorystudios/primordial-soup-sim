@@ -266,9 +266,11 @@ function cellParts(s, world, renderer) {
   const armor = c.armor * (c.type === 4 ? 3 : 1);
   if (armor > 0.15) {
     out.push(part('Cell wall', anchored(() => ({ x: c.x - c.r, y: c.y }), (20 + armor * 80) * NM * 2, dead), {
-      title: c.mito ? 'Pellicle / cell wall' : 'Cell wall (peptidoglycan)',
+      title: !c.mito ? 'Cell wall (peptidoglycan)' : c.plastid ? 'Cell wall (cellulose)' : 'Cell coat (glycocalyx)',
       kv: [['Thickness', formatLen(20 + armor * 80)], ['Armor gene', c.armor.toFixed(2)]],
-      desc: 'A tough mesh of sugar chains (glycan strands) tied together by short peptides: it resists bursting and makes the cell harder for predators to digest.',
+      desc: !c.mito ? 'A tough mesh of sugar chains (glycan strands) tied together by short peptides: it resists bursting and makes the cell harder for predators to digest.'
+        : c.plastid ? 'Layers of cellulose microfibrils (each ~3.5 nm, about 36 glucose chains) laid at angles like plywood, tethered by hemicellulose in a pectin gel. Eukaryotes have no peptidoglycan.'
+        : 'A fuzz of glycoproteins: protein fibres bristling with sugar chains, which protect the cell and help it recognise and stick to others. Eukaryotes have no peptidoglycan.',
     }, { parent: s, wallOf: { c, wall: (20 + armor * 80) * NM }, outline: () => ({ type: 'circle', x: c.x, y: c.y, r: c.r + (20 + armor * 80) * NM, w: (20 + armor * 80) * NM }) }));
   }
 

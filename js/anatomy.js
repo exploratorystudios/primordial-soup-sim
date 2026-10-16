@@ -228,13 +228,13 @@ export function piliLines(c, a) {
   }));
 }
 
-export function flagellumPath(c, t) {
+export function flagellumPath(c, t, n = 40) {
   const sp = Math.hypot(c.vx, c.vy);
   let ux = -Math.cos(c.heading), uy = -Math.sin(c.heading);
   if (sp > 0.02) { ux = -c.vx / sp; uy = -c.vy / sp; }
   const len = Math.min(20, c.r * 5), amp = 0.5, lambda = 5, ph = t * 0.8 + c.id, pts = [];
-  for (let k = 0; k <= 40; k++) {
-    const s = (k / 40) * len, w = amp * Math.sin((s / lambda) * TAU - ph) * Math.min(1, s / 1.5);
+  for (let k = 0; k <= n; k++) {
+    const s = (k / n) * len, w = amp * Math.sin((s / lambda) * TAU - ph) * Math.min(1, s / 1.5);
     pts.push({ x: c.x + ux * (c.r + s) - uy * w, y: c.y + uy * (c.r + s) + ux * w });
   }
   return pts;
@@ -260,13 +260,16 @@ export const MEMBRANE_PROTEINS = [
   { name: 'Transporter', size: 7, desc: 'Carries nutrients such as sugars or phosphate across the membrane, often powered by an ion gradient.' },
   { name: 'Proton pump', size: 8, desc: 'Pushes protons out of the cell, building the electrochemical gradient that powers much of its chemistry.' },
   { name: 'Receptor', size: 6, desc: 'Senses molecules outside the cell (and, unluckily, is what viruses latch onto).' },
+  { name: 'Aquaporin', size: 6, desc: 'A water channel: four subunits, each a pore so narrow that water molecules pass single file while ions are kept out.' },
 ];
+// A eukaryote's plasma membrane has no ATP synthase (that's in its mitochondria and chloroplasts) but has aquaporins.
+const EUK_MEMBRANE = [0, 2, 3, 4, 5];
 export function membraneProteinSpacing(R) { return (30 * NM) / R; } // radians between protein slots
 export function membraneProteinAt(c, k) {
   let h = Math.imul(c.id + 1, 0x9e3779b9) ^ Math.imul(k + 11, 0x85ebca6b);
   h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
   if ((h & 3) !== 0) return null; // ~1 in 4 slots holds a protein
-  return MEMBRANE_PROTEINS[(h >>> 4) % (c.mito ? 5 : 4)];
+  return c.mito ? MEMBRANE_PROTEINS[EUK_MEMBRANE[(h >>> 4) % EUK_MEMBRANE.length]] : MEMBRANE_PROTEINS[(h >>> 4) % 4];
 }
 
 // Peptidoglycan wall geometry: glycan-strand layers ~4 nm apart, cross-links every ~4 nm, sugar

@@ -6,21 +6,21 @@
 
 const VS = `#version 300 es
 in vec2 corner;
-in vec4 a0; in vec4 a1; in vec4 a2; in vec3 a3;
+in vec4 a0; in vec4 a1; in vec4 a2; in vec3 a3; in vec3 a4;
 uniform vec2 screen;
-out vec2 local; flat out vec4 v0; flat out vec4 v1; flat out vec4 v2; flat out vec3 v3;
+out vec2 local; flat out vec4 v0; flat out vec4 v1; flat out vec4 v2; flat out vec3 v3; flat out vec3 v4;
 void main() {
   // a0: centre x, y (device px), radius, half-size of the quad; a1: fill rgb, alpha;
   // a2: nucleus (0/1), wall ring radius, wall width, outline width; a3: outline alpha, square (0/1), fade
   local = corner * a0.w;
   vec2 p = a0.xy + local;
   gl_Position = vec4(p.x / screen.x * 2.0 - 1.0, 1.0 - p.y / screen.y * 2.0, 0.0, 1.0);
-  v0 = a0; v1 = a1; v2 = a2; v3 = a3;
+  v0 = a0; v1 = a1; v2 = a2; v3 = a3; v4 = a4; // a4: wall colour
 }`;
 
 const FS = `#version 300 es
 precision highp float;
-in vec2 local; flat in vec4 v0; flat in vec4 v1; flat in vec4 v2; flat in vec3 v3;
+in vec2 local; flat in vec4 v0; flat in vec4 v1; flat in vec4 v2; flat in vec3 v3; flat in vec3 v4;
 out vec4 o;
 vec4 over(vec4 s, vec4 d) { return s + d * (1.0 - s.a); }
 void main() {
@@ -33,7 +33,7 @@ void main() {
   float d = length(local);
   vec4 c = vec4(v1.rgb, 1.0) * v1.a * clamp(r - d + 0.5, 0.0, 1.0);
   if (v2.x > 0.5) { float m = 0.75 * clamp(0.34 * r - d + 0.5, 0.0, 1.0); c = over(vec4(30.0, 20.0, 60.0, 255.0) / 255.0 * m, c); }
-  if (v2.z > 0.0) { float m = 0.85 * clamp(v2.z * 0.5 - abs(d - v2.y) + 0.5, 0.0, 1.0); c = over(vec4(205.0, 165.0, 105.0, 255.0) / 255.0 * m, c); }
+  if (v2.z > 0.0) { float m = 0.85 * clamp(v2.z * 0.5 - abs(d - v2.y) + 0.5, 0.0, 1.0); c = over(vec4(v4, 1.0) * m, c); }
   if (v2.w > 0.0) { float m = v3.x * clamp(v2.w * 0.5 - abs(d - r) + 0.5, 0.0, 1.0); c = over(vec4(m), c); }
   if (c.a <= 0.0) discard;
   o = c * v3.z; // (a newborn fades in)
@@ -49,7 +49,7 @@ precision highp float;
 in float a; out vec4 o;
 void main() { o = vec4(220.0, 235.0, 255.0, 255.0) / 255.0 * a; }`;
 
-const PER = 15; // floats per cell instance
+const PER = 18; // floats per cell instance
 
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
@@ -89,7 +89,7 @@ export class GLCells {
     gl.enableVertexAttribArray(lc); gl.vertexAttribPointer(lc, 2, gl.FLOAT, false, 0, 0);
     this.instBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instBuf);
-    const sizes = [['a0', 4, 0], ['a1', 4, 4], ['a2', 4, 8], ['a3', 3, 12]];
+    const sizes = [['a0', 4, 0], ['a1', 4, 4], ['a2', 4, 8], ['a3', 3, 12], ['a4', 3, 15]];
     for (const [name, n, off] of sizes) {
       const l = gl.getAttribLocation(this.cellProg, name);
       gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, n, gl.FLOAT, false, PER * 4, off * 4); gl.vertexAttribDivisor(l, 1);
@@ -114,13 +114,13 @@ export class GLCells {
   }
 
   // One cell (device-pixel units).
-  cell(x, y, r, ext, R, G, B, A, nucleus, wallR, wallW, lineW, lineA, square, fade) {
+  cell(x, y, r, ext, R, G, B, A, nucleus, wallR, wallW, lineW, lineA, square, fade, wr = 0.8, wg = 0.65, wb = 0.41) {
     if ((this.n + 1) * PER > this.inst.length) { const b = new Float32Array(this.inst.length * 2); b.set(this.inst); this.inst = b; }
     const a = this.inst, o = this.n++ * PER;
     a[o] = x; a[o + 1] = y; a[o + 2] = r; a[o + 3] = ext;
     a[o + 4] = R; a[o + 5] = G; a[o + 6] = B; a[o + 7] = A;
     a[o + 8] = nucleus; a[o + 9] = wallR; a[o + 10] = wallW; a[o + 11] = lineW;
-    a[o + 12] = lineA; a[o + 13] = square; a[o + 14] = fade;
+    a[o + 12] = lineA; a[o + 13] = square; a[o + 14] = fade; a[o + 15] = wr; a[o + 16] = wg; a[o + 17] = wb;
   }
 
   // One flagellum segment (device pixels).

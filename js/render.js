@@ -34,6 +34,33 @@ export const DIM = {
 
 export const MONO_COLORS = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#efe6c4'];
 export const TYPE_COLORS = ['#9aa7b8', '#5fd16b', '#4fd2ff', '#ff5d6c', '#c79a5b', '#ffd23f'];
+// Outlines in world units for drawBilayerPath: an ellipse (closed), a circular arc, a polyline moved sideways,
+// and a rotated rectangle (closed).
+function ellipsePts(x, y, a, b, ang, n = 180) {
+  const out = [], ca = Math.cos(ang), sa = Math.sin(ang);
+  for (let k = 0; k < n; k++) { const t = (k / n) * TAU, lx = Math.cos(t) * a, ly = Math.sin(t) * b; out.push({ x: x + lx * ca - ly * sa, y: y + lx * sa + ly * ca }); }
+  return out;
+}
+function arcPts(x, y, R, a0, span, n = 60) {
+  const out = [];
+  for (let k = 0; k <= n; k++) { const t = a0 + (k / n) * span; out.push({ x: x + Math.cos(t) * R, y: y + Math.sin(t) * R }); }
+  return out;
+}
+function offsetPts(pts, d) {
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], L = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: p.x - ((b.y - a.y) / L) * d, y: p.y + ((b.x - a.x) / L) * d };
+  });
+}
+function rectPts(x, y, ang, lx, ly, w, h) {
+  const ca = Math.cos(ang), sa = Math.sin(ang), w2 = (u, v) => ({ x: x + u * ca - v * sa, y: y + u * sa + v * ca });
+  return [w2(lx, ly), w2(lx + w, ly), w2(lx + w, ly + h), w2(lx, ly + h)];
+}
+
+// A cell's wall seen from afar: peptidoglycan (bacteria), cellulose (algae) or a glycoprotein coat (other protists).
+const WALL_RGB = { prok: [205, 165, 105], alga: [190, 230, 180], coat: [200, 185, 235] };
+const wallKind = (c) => (!c.mito ? 'prok' : c.plastid ? 'alga' : 'coat');
+function wallColor(c) { const [r, g, b] = WALL_RGB[wallKind(c)]; return `rgba(${r},${g},${b},0.85)`; }
 // The same colours as numbers 0 … 1 (for the GPU), and the colour of a free cell in 'type' mode.
 const hexRGB = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 const TYPE_RGB = TYPE_COLORS.map(hexRGB), TYPE_RGB_FREE = hexRGB('#5d6878');
@@ -1194,6 +1221,54 @@ export class Renderer {
   // and only along the arc that is on screen.
   // twoTails: true (phospholipids), false (fatty acids), or the share of phospholipids in a mixed
   // membrane (opt.seed picks which lipids, opt.phHead colours their phosphate heads).
+  // A lipid bilayer along any outline (world points, dense enough), drawn like drawBilayer: up close, both
+  // leaflets' phospholipid heads (anchored along the outline, so they stay put), the oily core, the tails, and
+  // optionally proteins set through it (prot: { spacing, size, color }, all nm). Only the stretches on screen.
+  drawBilayerPath(pts, closed, head, tail, prot = null) {
+    const ctx = this.ctx, t = DIM.bilayer * NM, cx = this.cam.x, cy = this.cam.y, v = this.v, m = pts.length;
+    if (m < 2) return;
+    if (DIM.lipidSpacing * this.pxnm < 2.5) {
+      ctx.strokeStyle = head; ctx.lineWidth = Math.max(t, 1.1 * this.px);
+      ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy)));
+      if (closed) ctx.closePath();
+      ctx.stroke();
+      return;
+    }
+    const hr = DIM.lipidHead * NM, ds = DIM.lipidSpacing * NM, off = t / 2 - hr, tl = DIM.lipidTail * NM, pad = t * 3;
+    const core = new Path2D(), heads = new Path2D(), tails = this.pxnm >= 7 ? new Path2D() : null, protPath = prot ? new Path2D() : null;
+    let s0 = 0;
+    for (let i = 0, segs = closed ? m : m - 1; i < segs; i++) {
+      const p = pts[i], q = pts[(i + 1) % m], dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy);
+      if (!L) continue;
+      if (Math.max(p.x, q.x) + pad < v.x0 || Math.min(p.x, q.x) - pad > v.x1 || Math.max(p.y, q.y) + pad < v.y0 || Math.min(p.y, q.y) - pad > v.y1) { s0 += L; continue; }
+      const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+      core.moveTo(p.x - cx, p.y - cy); core.lineTo(q.x - cx, q.y - cy);
+      for (let k = Math.ceil(s0 / ds); k * ds < s0 + L; k++) {
+        const u = k * ds - s0, wob = Math.sin(this.time * 0.6 + k * 1.37) * 0.12 * NM;
+        const bx = p.x + ux * u - cx, by = p.y + uy * u - cy, bx2 = bx + ux * ds * 0.5, by2 = by + uy * ds * 0.5;
+        const ox = bx + nx * (off + wob), oy = by + ny * (off + wob), ix = bx2 - nx * (off - wob), iy = by2 - ny * (off - wob);
+        heads.moveTo(ox + hr, oy); heads.arc(ox, oy, hr, 0, TAU);
+        heads.moveTo(ix + hr, iy); heads.arc(ix, iy, hr, 0, TAU);
+        if (tails) for (const o of [-0.22 * NM, 0.22 * NM]) {
+          tails.moveTo(ox + ux * o - nx * hr, oy + uy * o - ny * hr); tails.lineTo(ox + ux * o - nx * (hr + tl), oy + uy * o - ny * (hr + tl));
+          tails.moveTo(ix + ux * o + nx * hr, iy + uy * o + ny * hr); tails.lineTo(ix + ux * o + nx * (hr + tl), iy + uy * o + ny * (hr + tl));
+        }
+      }
+      if (prot) {
+        const sp = prot.spacing * NM;
+        for (let k = Math.ceil(s0 / sp); k * sp < s0 + L; k++) {
+          const u = k * sp - s0, x = p.x + ux * u - cx, y = p.y + uy * u - cy, rx = (prot.size * NM) / 2, ry = (t + 3 * NM) / 2;
+          protPath.moveTo(x + rx * ux, y + rx * uy); protPath.ellipse(x, y, rx, ry, Math.atan2(uy, ux), 0, TAU);
+        }
+      }
+      s0 += L;
+    }
+    ctx.strokeStyle = tail; ctx.lineWidth = t * 0.55; ctx.stroke(core);
+    ctx.fillStyle = head; ctx.fill(heads);
+    if (tails) { ctx.strokeStyle = 'rgba(210,190,130,0.8)'; ctx.lineWidth = 0.13 * NM; ctx.stroke(tails); }
+    if (protPath) { ctx.fillStyle = prot.color; ctx.fill(protPath); }
+  }
+
   drawBilayer(x, y, R, head, tail, twoTails = false, cell = null, opt = null) {
     const ctx = this.ctx, v = this.v, t = DIM.bilayer * NM;
     const X = x - this.cam.x, Y = y - this.cam.y;
@@ -1331,7 +1406,8 @@ export class Renderer {
       if (armor > 0.15) { const wall = (20 + armor * 80) * NM; wallW = Math.max(wall, px) * ppu; wallR = (c.r + wall / 2) * ppu; }
       if (!c._dividing && (rp > 3 || c.mito)) { lw = Math.max(DIM.bilayer * NM, px * (c.mito ? 1.2 : 0.8)) * ppu; la = c.mito ? 0.75 : 0.3; }
       const ext = Math.max(rp + lw / 2, wallR + wallW / 2) + 1.5;
-      g.cell(X, Y, rp, ext, rgb[0], rgb[1], rgb[2], A, c.mito && rp > 3 ? 1 : 0, wallR, wallW, lw, la, 0, fade);
+      const wc = WALL_RGB[wallKind(c)];
+      g.cell(X, Y, rp, ext, rgb[0], rgb[1], rgb[2], A, c.mito && rp > 3 ? 1 : 0, wallR, wallW, lw, la, 0, fade, wc[0] / 255, wc[1] / 255, wc[2] / 255);
     }
     g.end();
   }
@@ -1393,9 +1469,9 @@ export class Renderer {
     const armor = c.armor * (c.type === 4 ? 3 : 1);
     if (armor > 0.15) {
       const wall = (20 + armor * 80) * NM;
-      if (this.pxnm >= 1.5) this.drawWallMesh(c, wall);
+      if (this.pxnm >= 1.5) { if (c.mito) this.drawEukWall(c, wall); else this.drawWallMesh(c, wall); }
       else {
-        ctx.strokeStyle = 'rgba(205,165,105,0.85)';
+        ctx.strokeStyle = wallColor(c);
         ctx.lineWidth = Math.max(wall, px);
         if (this.bigRing(X, Y, c.r + wall / 2)) ctx.stroke();
       }
@@ -1411,6 +1487,7 @@ export class Renderer {
   }
 
   drawFlagellum(c, t) {
+    if (c.mito && 250 * NM * this.ppu >= 10) { this.drawEukFlagellum(c, t); return; }
     const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
     // Bacterial flagella are ~20 nm thick and several µm long, beating as a helix; eukaryotic ones ~250 nm.
     ctx.strokeStyle = 'rgba(220,235,255,0.4)';
@@ -1418,6 +1495,115 @@ export class Renderer {
     ctx.beginPath();
     flagellumPath(c, t).forEach((q, k) => (k ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy)));
     ctx.stroke();
+  }
+
+  // The actin cortex: a meshwork of 7 nm actin filaments ~20-150 nm under the plasma membrane, giving the cell its
+  // shape and its crawling movements. Up close each filament is two twisted strands of actin subunits (~5.5 nm,
+  // a half-turn every ~37 nm).
+  drawActinCortex(c) {
+    const pxnm = this.pxnm;
+    if (7 * pxnm < 1) return;
+    const ctx = this.ctx, v = this.v, X = c.x - this.cam.x, Y = c.y - this.cam.y, R = c.r - 80 * NM;
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    if (d - half > c.r || d + half < c.r - 160 * NM) return;
+    const { mid, phi } = this.visibleArc(X, Y, R, d, half), da = (30 * NM) / R;
+    const fil = [];
+    for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+      const h1 = hash32(c.id + 7, k) / 4294967296, h2 = hash32(c.id + 13, k) / 4294967296, h3 = hash32(c.id + 29, k) / 4294967296;
+      const a = k * da, rr = c.r - (20 + h1 * 130) * NM, len = (80 + h2 * 170) * NM, tilt = (h3 - 0.5) * 2.1;
+      const x = X + Math.cos(a) * rr, y = Y + Math.sin(a) * rr, dir = a + Math.PI / 2 + tilt;
+      fil.push([x - Math.cos(dir) * len / 2, y - Math.sin(dir) * len / 2, x + Math.cos(dir) * len / 2, y + Math.sin(dir) * len / 2]);
+    }
+    ctx.strokeStyle = 'rgba(255,120,120,0.45)'; ctx.lineWidth = Math.max(7 * NM, 0.6 * this.px);
+    ctx.beginPath(); for (const [x1, y1, x2, y2] of fil) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); } ctx.stroke();
+    if (pxnm >= 3) {
+      ctx.fillStyle = 'rgba(255,150,140,0.9)';
+      ctx.beginPath();
+      for (const [x1, y1, x2, y2] of fil) {
+        const L = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / L, uy = (y2 - y1) / L, n = Math.floor(L / (2.75 * NM));
+        for (let i = 0; i < n; i++) {
+          const u = i * 2.75 * NM, side = i & 1 ? 1 : -1, off = side * 1.8 * NM * Math.abs(Math.cos((u / (37 * NM)) * Math.PI));
+          const x = x1 + ux * u - uy * off, y = y1 + uy * u + ux * off;
+          ctx.moveTo(x + 2.5 * NM, y); ctx.arc(x, y, 2.5 * NM, 0, TAU);
+        }
+      }
+      ctx.fill();
+    }
+  }
+
+  // Kinesin motors carrying cargo vesicles out along microtubules (toward their + ends at the cell edge), stepping
+  // 8 nm at a time hand over hand.
+  drawKinesinCargo(c, a) {
+    const pxnm = this.pxnm;
+    if (60 * NM * this.ppu < 2) return;
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, mts = microtubules(c, a, this.time);
+    for (let i = 0; i < Math.min(6, mts.length); i++) {
+      const m = mts[i], L = Math.hypot(m.x2 - m.x1, m.y2 - m.y1);
+      if (!L) continue;
+      const ux = (m.x2 - m.x1) / L, uy = (m.y2 - m.y1) / L, u = ((this.time * 2 * NM + hash32(c.id, i) / 4294967296 * L) % L);
+      const hx = m.x1 + ux * u, hy = m.y1 + uy * u, vr = 40 * NM, vx = hx - uy * (vr + 60 * NM), vy = hy + ux * (vr + 60 * NM);
+      if (!this.inView(vx, vy, vr + 80 * NM)) continue;
+      if (pxnm >= 0.3) {
+        const step = (Math.floor(this.time) & 1) ? 4 * NM : -4 * NM;
+        ctx.strokeStyle = 'rgba(255,230,140,0.9)'; ctx.lineWidth = Math.max(3 * NM, 0.6 * this.px);
+        ctx.beginPath();
+        for (const o of [step, -step]) { ctx.moveTo(hx + ux * o - cx, hy + uy * o - cy); ctx.lineTo(hx - uy * 20 * NM - cx, hy + ux * 20 * NM - cy); }
+        ctx.lineTo(vx - uy * vr - cx + uy * 2 * vr, vy + ux * vr - cy - ux * 2 * vr);
+        ctx.stroke();
+      }
+      if (DIM.lipidSpacing * pxnm >= 2.5) this.drawBilayer(vx, vy, vr, 'rgba(255,215,160,0.95)', 'rgba(210,160,100,0.45)', true);
+      else { ctx.fillStyle = 'rgba(255,210,150,0.8)'; ctx.beginPath(); ctx.arc(vx - cx, vy - cy, vr, 0, TAU); ctx.fill(); }
+    }
+  }
+
+  // The basal body anchoring a eukaryotic flagellum: a centriole (~250 nm × 500 nm, nine microtubule triplets).
+  drawBasalBody(c) {
+    if (250 * NM * this.ppu < 6) return;
+    // Right under the flagellum's base, along the way it leaves the cell (straight out from the centre).
+    const ctx = this.ctx, b = flagellumPath(c, this.time, 1)[0], ux = (b.x - c.x) / c.r, uy = (b.y - c.y) / c.r;
+    const x = b.x - ux * 260 * NM - this.cam.x, y = b.y - uy * 260 * NM - this.cam.y;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(uy, ux));
+    ctx.fillStyle = 'rgba(180,230,255,0.25)'; ctx.fillRect(-250 * NM, -125 * NM, 500 * NM, 250 * NM);
+    ctx.strokeStyle = 'rgba(200,240,255,0.9)'; ctx.lineWidth = Math.max(25 * NM, 0.8 * this.px);
+    ctx.beginPath(); for (const o of [-100, -50, 0, 50, 100]) { ctx.moveTo(-250 * NM, o * NM); ctx.lineTo(250 * NM, o * NM); } ctx.stroke();
+    ctx.restore();
+  }
+
+  // A eukaryotic flagellum up close: a shaft of the cell's own membrane (~250 nm across) around the axoneme, nine
+  // microtubule doublets ringing a central pair (side on, the doublets show at their projected offsets), with
+  // dynein arms every 24 nm (the motors that slide doublets and bend it) and radial spokes every 96 nm.
+  drawEukFlagellum(c, t) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, ppu = this.ppu, pxnm = this.pxnm, R = 125 * NM;
+    const path = flagellumPath(c, t, pxnm >= 0.3 ? 400 : 120), line = (pts) => { ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy))); };
+    ctx.strokeStyle = 'rgba(200,225,255,0.12)'; ctx.lineWidth = 2 * R; line(path); ctx.stroke(); // the matrix inside
+    const mt = Math.max(25 * NM, this.px);
+    ctx.strokeStyle = 'rgba(160,220,255,0.55)'; ctx.lineWidth = mt;
+    for (let k = 0; k < 9; k++) { line(offsetPts(path, 90 * NM * Math.cos((k / 9) * TAU + 0.3))); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(190,235,255,0.7)';
+    for (const o of [-15 * NM, 15 * NM]) { line(offsetPts(path, o)); ctx.stroke(); }
+    if (pxnm >= 0.6) {
+      // Dynein arms on the outermost doublets (every 24 nm), radial spokes toward the centre (every 96 nm).
+      const arms = new Path2D(), spokes = new Path2D();
+      for (const side of [-1, 1]) {
+        const d = offsetPts(path, side * 90 * NM);
+        let acc = 0;
+        for (let i = 1; i < d.length; i++) {
+          const p = d[i - 1], q = d[i], L = Math.hypot(q.x - p.x, q.y - p.y);
+          if (!L || !this.inView(p.x, p.y, 200 * NM)) { acc += L; continue; }
+          const ux = (q.x - p.x) / L, uy = (q.y - p.y) / L, nx = -uy * side, ny = ux * side;
+          for (let k = Math.ceil(acc / (24 * NM)); k * 24 * NM < acc + L; k++) {
+            const u = k * 24 * NM - acc, x = p.x + ux * u - cx, y = p.y + uy * u - cy;
+            arms.moveTo(x + nx * 12 * NM, y + ny * 12 * NM); arms.lineTo(x + nx * 22 * NM + ux * 8 * NM, y + ny * 22 * NM + uy * 8 * NM);
+            if (k % 4 === 0) { spokes.moveTo(x - nx * 12 * NM, y - ny * 12 * NM); spokes.lineTo(x - nx * 60 * NM, y - ny * 60 * NM); }
+          }
+          acc += L;
+        }
+      }
+      ctx.lineWidth = Math.max(4 * NM, 0.7 * this.px);
+      ctx.strokeStyle = 'rgba(255,180,120,0.9)'; ctx.stroke(arms);
+      ctx.strokeStyle = 'rgba(230,230,160,0.6)'; ctx.stroke(spokes);
+    }
+    for (const side of [-1, 1]) this.drawBilayerPath(offsetPts(path, side * R), false, 'rgba(235,240,255,0.9)', 'rgba(190,200,230,0.4)');
   }
 
   drawPili(c) {
@@ -1433,7 +1619,7 @@ export class Renderer {
   anatomy(c) { return buildAnatomy(c); }
 
   drawCellInterior(c) {
-    const ctx = this.ctx, a = this.anatomy(c), ppu = this.ppu, px = this.px;
+    const ctx = this.ctx, a = this.anatomy(c), ppu = this.ppu, px = this.px, pxnm = this.pxnm;
     const X = c.x - this.cam.x, Y = c.y - this.cam.y, r = c.r, cx = this.cam.x, cy = this.cam.y;
     const line = (w) => Math.max(w * NM, 0.8 * px);
     const big = (units) => units * ppu > 1.5; // worth drawing at this zoom
@@ -1495,15 +1681,24 @@ export class Renderer {
     for (const m of microtubules(c, a, this.time)) { ctx.moveTo(m.x1 - cx, m.y1 - cy); ctx.lineTo(m.x2 - cx, m.y2 - cy); }
     ctx.stroke();
     if (25 * NM * ppu > 6) this.drawTubulin(c, a);
+    this.drawActinCortex(c);
+    this.drawKinesinCargo(c, a);
+    if (c.motil > 0.3) this.drawBasalBody(c);
     // Endoplasmic reticulum, studded with ribosomes (rough ER).
+    const lipids = DIM.lipidSpacing * this.pxnm >= 2.5; // close enough to see membranes as bilayers
     ctx.strokeStyle = 'rgba(190,170,230,0.35)';
     ctx.lineWidth = line(50);
-    for (const e of a.er) { ctx.beginPath(); ctx.arc(X, Y, e.rr * r, e.a0, e.a0 + e.span); ctx.stroke(); }
+    for (const e of a.er) {
+      ctx.beginPath(); ctx.arc(X, Y, e.rr * r, e.a0, e.a0 + e.span); ctx.stroke();
+      // A flattened sac: two membranes round a ~50 nm lumen.
+      if (lipids) for (const side of [-1, 1]) this.drawBilayerPath(arcPts(c.x, c.y, e.rr * r + side * 25 * NM, e.a0, e.span, 120), false, 'rgba(215,195,250,0.95)', 'rgba(170,150,210,0.45)');
+    }
     if (rib * 2 * ppu >= 0.8) drawRibos(erRibosomes(c, a), c.id * 4099 + 100000);
     // Golgi apparatus: a stack of flattened cisternae, budding transport vesicles.
     ctx.strokeStyle = 'rgba(255,200,120,0.85)';
     ctx.lineWidth = line(30);
     for (const cis of golgiCisternae(c, a)) {
+      if (lipids) { for (const side of [-1, 1]) this.drawBilayerPath(offsetPts(cis.pts, side * 15 * NM), false, 'rgba(255,215,150,0.95)', 'rgba(220,170,100,0.45)'); continue; }
       ctx.beginPath();
       cis.pts.forEach((q, i) => (i ? ctx.lineTo(q.x - cx, q.y - cy) : ctx.moveTo(q.x - cx, q.y - cy)));
       ctx.stroke();
@@ -1539,10 +1734,15 @@ export class Renderer {
     ctx.fillStyle = 'rgba(100,70,150,0.95)';
     ctx.beginPath(); ctx.arc(X + a.nuc.fx * nr, Y + a.nuc.fy * nr, nr * 0.3, 0, TAU); ctx.fill();
     const gap = DIM.nuclearGap * NM;
-    ctx.strokeStyle = 'rgba(220,200,255,0.85)';
-    ctx.lineWidth = line(8);
-    if (this.bigRing(X, Y, nr)) ctx.stroke();
-    if (this.bigRing(X, Y, nr + gap)) ctx.stroke();
+    if (lipids) { // the envelope: two bilayers ~30 nm apart (the outer one continues into the ER)
+      this.drawBilayer(c.x, c.y, nr + DIM.bilayer * NM, 'rgba(225,205,255,0.95)', 'rgba(185,160,230,0.45)', true);
+      this.drawBilayer(c.x, c.y, nr + gap + DIM.bilayer * NM, 'rgba(225,205,255,0.95)', 'rgba(185,160,230,0.45)', true);
+    } else {
+      ctx.strokeStyle = 'rgba(220,200,255,0.85)';
+      ctx.lineWidth = line(8);
+      if (this.bigRing(X, Y, nr)) ctx.stroke();
+      if (this.bigRing(X, Y, nr + gap)) ctx.stroke();
+    }
     const pore = (DIM.nuclearPore * NM) / 2;
     if (pore * 2 * ppu >= 2) {
       ctx.fillStyle = 'rgba(255,240,200,0.9)';
@@ -1567,13 +1767,29 @@ export class Renderer {
       ctx.fillStyle = '#2fb84f';
       ctx.strokeStyle = '#1b6e30';
       ctx.lineWidth = line(7);
-      ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); if (!lipids) ctx.stroke();
       if (L * ppu > 25) {
         ctx.fillStyle = 'rgba(10,70,25,0.85)';
         for (const g of grana(L, W)) for (const d of g.discs) ctx.fillRect(d.x, d.y, d.w, d.h);
         // cpDNA
         ctx.strokeStyle = 'rgba(225,235,255,0.6)'; ctx.lineWidth = line(DIM.dna);
         ctx.beginPath(); ctx.ellipse(L * 0.3, W * 0.22, W * 0.08, W * 0.05, 0, 0, TAU); ctx.stroke();
+        // Pyrenoid: a dense body of RuBisCO (the CO₂-fixing enzyme) in a sheath of starch plates, where algae
+        // concentrate CO₂ (a CO₂-concentrating mechanism, like a bacterium's carboxysome).
+        const pr = W * 0.1, pxc = 0, pyc = -W * 0.3; // (between the grana and the envelope)
+        ctx.fillStyle = 'rgba(55,140,75,0.95)'; ctx.beginPath(); ctx.arc(pxc, pyc, pr, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'rgba(240,240,215,0.85)'; ctx.lineWidth = pr * 0.2;
+        for (let k = 0; k < 7; k++) { const a0 = (k / 7) * TAU + 0.1; ctx.beginPath(); ctx.arc(pxc, pyc, pr * 1.15, a0, a0 + (TAU / 7) * 0.8); ctx.stroke(); }
+        if (11 * NM * pxnm >= 1.5) {
+          ctx.fillStyle = 'rgba(130,215,140,0.9)';
+          const sp = 13 * NM, n = Math.ceil(pr / sp);
+          ctx.beginPath();
+          for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) {
+            const x = (i + (j & 1) * 0.5) * sp, y = j * sp * 0.87;
+            if (x * x + y * y < pr * pr * 0.9) { ctx.moveTo(pxc + x + 5.5 * NM, pyc + y); ctx.arc(pxc + x, pyc + y, 5.5 * NM, 0, TAU); }
+          }
+          ctx.fill();
+        }
         if (L / 40 * ppu > 6) {
           // Photosystems on the thylakoid discs (~20 nm complexes).
           ctx.fillStyle = 'rgba(120,255,140,0.9)';
@@ -1581,6 +1797,13 @@ export class Renderer {
         }
       }
       ctx.restore();
+      if (lipids) {
+        // A double envelope (~10 nm apart), and each thylakoid disc a sac of membrane holding the photosystems.
+        const px0 = c.x + p.fx * r, py0 = c.y + p.fy * r, e = 10 * NM + DIM.bilayer * NM;
+        this.drawBilayerPath(ellipsePts(px0, py0, L / 2, W / 2, p.ang), true, 'rgba(170,240,170,0.95)', 'rgba(60,140,70,0.5)');
+        this.drawBilayerPath(ellipsePts(px0, py0, L / 2 - e, W / 2 - e, p.ang), true, 'rgba(170,240,170,0.95)', 'rgba(60,140,70,0.5)');
+        for (const g of grana(L, W)) for (const d of g.discs) this.drawBilayerPath(rectPts(px0, py0, p.ang, d.x, d.y, d.w, d.h), true, 'rgba(150,255,160,0.95)', 'rgba(40,120,50,0.5)');
+      }
     }
     // Mitochondria (~1 × 0.5 µm) with folded inner membranes (cristae).
     const budding = c.endoT !== undefined && (c.mitoN ?? 99) < 99 ? ((this.time - c.endoT) / 40) % 1 : 1;
@@ -1594,14 +1817,25 @@ export class Renderer {
       ctx.fillStyle = '#ff9a76';
       ctx.strokeStyle = '#b8563a';
       ctx.lineWidth = line(7);
-      ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, L / 2, W / 2, 0, 0, TAU); ctx.fill(); if (!lipids) ctx.stroke();
       if (L * ppu > 25) {
-        ctx.beginPath();
-        for (const k of cristae(L, W)) { ctx.moveTo(k.x, k.y1); ctx.lineTo(k.x, k.y2); }
-        ctx.stroke();
+        if (!lipids) {
+          ctx.beginPath();
+          for (const k of cristae(L, W)) { ctx.moveTo(k.x, k.y1); ctx.lineTo(k.x, k.y2); }
+          ctx.stroke();
+        }
         // mtDNA loop in the matrix.
         ctx.strokeStyle = 'rgba(225,235,255,0.7)'; ctx.lineWidth = line(DIM.dna);
         ctx.beginPath(); ctx.ellipse(L * 0.18, 0, W * 0.12, W * 0.08, 0, 0, TAU); ctx.stroke();
+        // Mitoribosomes (~25 nm, bacteria-like: a relic of the mitochondrion's origin) make a few of its proteins.
+        if (25 * NM * pxnm >= 1.5) {
+          ctx.fillStyle = 'rgba(255,240,200,0.9)';
+          for (let q = 0; q < 8; q++) {
+            const h1 = hash32(c.id * 31 + mi, q) / 4294967296, h2 = hash32(c.id * 37 + mi, q + 50) / 4294967296;
+            const x = (h1 - 0.5) * L * 0.7, y = (h2 - 0.5) * W * 0.4;
+            ctx.beginPath(); ctx.arc(x, y, 12 * NM, 0, TAU); ctx.fill();
+          }
+        }
         if (10 * NM * ppu > 4) {
           // ATP synthase heads lining the cristae, every ~20 nm.
           ctx.fillStyle = 'rgba(255,230,120,0.95)';
@@ -1612,8 +1846,85 @@ export class Renderer {
         }
       }
       ctx.restore();
+      if (lipids) {
+        // Outer membrane, studded with porins (VDAC channels); the inner membrane ~15 nm inside, folding into the
+        // cristae (each a narrow pocket: two layers of inner membrane ~20 nm apart).
+        const mx = c.x + m.fx * r, my = c.y + m.fy * r, e = 15 * NM + DIM.bilayer * NM, ca = Math.cos(m.ang), sa = Math.sin(m.ang);
+        const w2 = (u, v) => ({ x: mx + u * ca - v * sa, y: my + u * sa + v * ca });
+        this.drawBilayerPath(ellipsePts(mx, my, L / 2, W / 2, m.ang), true, 'rgba(255,190,160,0.95)', 'rgba(190,100,70,0.5)', { spacing: 22, size: 3.5, color: 'rgba(140,200,255,0.95)' });
+        this.drawBilayerPath(ellipsePts(mx, my, L / 2 - e, W / 2 - e, m.ang), true, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)');
+        for (const k of cristae(L, W)) for (const side of [-1, 1]) {
+          const pts = []; for (let q = 0; q <= 12; q++) pts.push(w2(k.x + side * 10 * NM, k.y1 + (k.y2 - k.y1) * (q / 12)));
+          this.drawBilayerPath(pts, false, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)');
+        }
+      }
     }
     this.drawInfection(c);
+  }
+
+  // Eukaryotes have no peptidoglycan. An alga's wall is cellulose: microfibrils (~3.5 nm bundles of ~36 glucose
+  // chains) in layers like plywood, each layer's fibrils at an angle to the last (here alternately running round
+  // the cell and running out of view, seen end on), tethered by hemicellulose in a pectin gel. Other protists are
+  // wrapped in a glycoprotein coat (glycocalyx): protein fibres bristling with sugar chains.
+  drawEukWall(c, wall) {
+    const ctx = this.ctx, v = this.v, X = c.x - this.cam.x, Y = c.y - this.cam.y;
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    const R0 = c.r + 2 * NM;
+    if (d - half > R0 + wall || d + half < R0) return;
+    const { mid, phi } = this.visibleArc(X, Y, R0 + wall / 2, d, half);
+    const at = (r, a) => [X + Math.cos(a) * r, Y + Math.sin(a) * r];
+    if (c.plastid) {
+      ctx.fillStyle = 'rgba(170,215,160,0.16)'; // pectin gel
+      ctx.beginPath(); ctx.arc(X, Y, R0 + wall, mid - phi, mid + phi); ctx.arc(X, Y, R0, mid + phi, mid - phi, true); ctx.fill();
+      const n = Math.max(2, Math.round(wall / (12 * NM))), lw = 3.5 * NM, dot = 20 * NM;
+      for (let i = 0; i < n; i++) {
+        const R = R0 + (i + 0.5) * (wall / n);
+        if (i % 2 === 0) { // fibrils running round the cell
+          ctx.strokeStyle = 'rgba(225,245,215,0.9)'; ctx.lineWidth = lw;
+          ctx.beginPath(); ctx.arc(X, Y, R, mid - phi, mid + phi); ctx.stroke();
+        } else { // fibrils seen end on
+          ctx.fillStyle = 'rgba(225,245,215,0.9)';
+          const da = dot / R, off = (i % 4 === 1 ? 0.5 : 0) * da;
+          ctx.beginPath();
+          for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) { const [x, y] = at(R, k * da + off); ctx.moveTo(x + lw / 2, y); ctx.arc(x, y, lw / 2, 0, TAU); }
+          ctx.fill();
+        }
+      }
+      if (this.pxnm >= 4) { // hemicellulose (xyloglucan) tethers between neighbouring layers
+        ctx.strokeStyle = 'rgba(190,230,150,0.75)'; ctx.lineWidth = 0.8 * NM;
+        ctx.beginPath();
+        for (let i = 0; i + 1 < n; i++) {
+          const r1 = R0 + (i + 0.5) * (wall / n), r2 = R0 + (i + 1.5) * (wall / n), da = (15 * NM) / r1;
+          for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+            const a = (k + (i % 2) * 0.5) * da, [x1, y1] = at(r1, a), [x2, y2] = at(r2, a + da * 0.3);
+            ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+          }
+        }
+        ctx.stroke();
+      }
+      return;
+    }
+    // Glycocalyx: glycoprotein fibres every ~8 nm, with short sugar branches.
+    const da = (8 * NM) / R0;
+    ctx.strokeStyle = 'rgba(205,190,240,0.8)'; ctx.lineWidth = 2 * NM;
+    ctx.beginPath();
+    for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+      const a = k * da, L = wall * (0.6 + 0.4 * (hash32(c.id, k) / 4294967296)), [x1, y1] = at(R0, a), [x2, y2] = at(R0 + L, a);
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    }
+    ctx.stroke();
+    if (this.pxnm >= 4) {
+      ctx.strokeStyle = 'rgba(255,215,240,0.8)'; ctx.lineWidth = 0.8 * NM;
+      ctx.beginPath();
+      for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+        const a = k * da, L = wall * (0.6 + 0.4 * (hash32(c.id, k) / 4294967296));
+        for (let j = 1; j <= 3; j++) {
+          const r = R0 + (L * j) / 4, side = (j + k) % 2 ? 1 : -1, [x1, y1] = at(r, a), [x2, y2] = at(r + 2 * NM, a + side * (3 * NM) / r);
+          ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+        }
+      }
+      ctx.stroke();
+    }
   }
 
   // Peptidoglycan cell wall up close: layers of glycan strands (sugar chains) tied together by short
