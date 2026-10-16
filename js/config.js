@@ -82,23 +82,24 @@ export const CFG = {
   AER_COST: 0.006,
   ARM_COST: 0.015,
   ADH_COST: 0.002,
-  ADH_BOOST: 0,
-  COLMAX_INIT: 0.1,
-  ADH_INIT: 0.06,          // founders' adhesion gene starts in [0, this): more variation for selection to act on
-  SHARE_INIT: 0.2,         // founders' energy-sharing gene starts in [0, this)
-  SHIELD: false,           // predators and viruses reach only a colony's exposed cells (inner cells are shielded)
+  // Multicellularity (defaults adopted 2026-10-16; the old behaviour in brackets).
+  ADH_BOOST: 0,            // added to every cell's chance that a daughter stays attached (its adhesion gene)
+  COLMAX_INIT: 0.25,       // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells [0.1]
+  ADH_INIT: 0.4,           // founders' adhesion gene starts in [0, this): sticky lineages for selection to act on [0.06]
+  SHARE_INIT: 0.5,         // founders' energy-sharing gene starts in [0, this) [0.2]
+  SHIELD: true,           // predators and viruses reach only a colony's exposed cells (inner cells are shielded)
   SHIELD_BONDS: 3,         // a cell bonded to at least this many neighbours counts as inner
   FRAGMENT: false,         // a colony that reaches its size limit splits into two halves that keep their cells,
                            // bonds and jobs (like snowflake yeast and filamentous cyanobacteria)
-  PARATOMY: false,         // instead of splitting at its size limit, a colony first grows a copy of itself (new cells
+  PARATOMY: true,          // instead of splitting at its size limit, a colony first grows a copy of itself (new cells
                            // keep their parent's job) to double size, then splits into two matching halves (cf. annelid
                            // and flatworm paratomy, Volvox daughter colonies). Takes the place of FRAGMENT.
-  PARATOMY_EUK: true,      // with PARATOMY, eukaryotic colonies reproduce by paratomy too; false = bacteria only, as in
+  PARATOMY_EUK: false,     // with PARATOMY, eukaryotic colonies reproduce by paratomy too; false = bacteria only, as in
                            // nature (filamentous bacteria fragment; complex eukaryotes go through a spore or egg)
-  GERM_SETASIDE: 0,        // eukaryotic colonies of at least this many cells with no germline set one cell aside as
+  GERM_SETASIDE: 16,       // eukaryotic colonies of at least this many cells with no germline set one cell aside as
                            // germline (the one whose fate genes lean most toward it, unless they are strongly against:
                            // score below -0.5), as germ/body splits appear with size in Volvox and its relatives. 0 = off
-  GERM_MUT: 1,             // mutation rate of a germline cell's offspring, as a fraction of normal: germ cells divide
+  GERM_MUT: 0.2,           // mutation rate of a germline cell's offspring, as a fraction of normal: germ cells divide
                            // rarely and are kept from damage (the Weismann barrier), so their offspring start cleaner
   PARA_TIME: 4000,         // ticks a colony may spend doubling before it splits anyway
   PARA_COST: 0.01,         // extra upkeep (x metabolic size) for a doubling colony beyond the oxygen-limited body size
@@ -107,15 +108,15 @@ export const CFG = {
                            // more as colonies grow; cf. Volvox's flagellation constraint). 0 = off; try 0.4
   SPEC_BONUS: 0,           // division of labour pays: a specialist cell in a colony does its job (feeding, swimming,
                            // engulfing, armour) at 1 + SPEC_BONUS x min(1, (cells - 1) / 15) strength. 0 = off; try 0.5
-  MORPH: false,            // body plans: growth genes (angle, branch spread, branching, alternating sides) decide where
+  MORPH: true,             // body plans: growth genes (angle, branch spread, branching, alternating sides) decide where
                            // each new colony cell attaches, and angle springs hold the shape, so offspring regrow their
                            // parent's form (or a mutated one). Filaments grow by inserting cells along their length.
   MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
-  CULL_FAIR: false,        // the crowding cull judges a colony cell by its colony's average weakness, not its own
+  CULL_FAIR: true,         // the crowding cull judges a colony cell by its colony's average weakness, not its own
                            // (colony cells share energy, so one alone can look weak while its colony is healthy)
-  GERM_STEM: false,        // germline stem cells: a ready germ cell stays in the body and releases its daughter as the
+  GERM_STEM: true,         // germline stem cells: a ready germ cell stays in the body and releases its daughter as the
                            // next generation's founder (a spore or egg), instead of leaving the body itself
-  COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
+  COLONY_SWIM: true,       // a colony swims as one body: its cells' combined thrust over the colony's whole mass
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
   O2_YIELD: 0.1,
@@ -139,21 +140,21 @@ export const CFG = {
   HGT_P: 0.0004,
   SPECIATE: 0.07,
   DAMP: 0.82,
-  BOND_BREAK: 0.00015,
-  RECYCLE: false,          // a colony cell that dies (not eaten) passes its nutrient (its body material) and half its
+  BOND_BREAK: 0.00003,     // chance per tick a bond breaks at random [0.00015]
+  RECYCLE: true,           // a colony cell that dies (not eaten) passes its nutrient (its body material) and half its
                            // energy to its bonded neighbours instead of the water (apoptosis: neighbours reuse dying cells),
                            // so they can divide to replace it and bodies persist through cell turnover
-  JUNCTIONS: false,        // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
+  JUNCTIONS: true,         // a bond's strength comes from its two cells' adhesion genes (as cadherins both keep daughters
                            // and hold tissue): stronger bonds break less at random, stretch up to twice as far and pull
                            // back harder, and when a cell dies its neighbours re-bond (heal) with that chance
-  SHARE_K: 0.1,
+  SHARE_K: 0.3,            // energy and nutrient exchange across bonds (specialists starved at 0.1)
   MAX_BONDS: 5,
   // Multicellularity as on Earth: bacteria form colonies and simple multicellular organisms (no mouth or
   // germline cells: engulfing needs a eukaryotic cytoskeleton), so complex organisms are eukaryotic; and
   // bodies above O2_SIZE_MIN cells need oxygen, up to O2_SIZE_MAX cells when fully oxygenated.
   REALISTIC_MULTI: true,
   O2_SIZE_MIN: 16, O2_SIZE_MAX: 62,
-  GENERALIST_BIAS: 0.2,
+  GENERALIST_BIAS: 0.05,   // how strongly colony cells default to the undifferentiated fate [0.2]
 
   // Major transitions
   RIBOSOME_COST: 0.004,    // upkeep of protein-synthesis machinery, per unit translation
@@ -174,7 +175,7 @@ export const CFG = {
   VIRUS_MUT: 0.04,
   MAX_VIRUSES: 4000,
   TRANSDUCE: 0.1,
-  RESIST_COST: 0.008,    // how strongly colony cells default to the undifferentiated fate
+  RESIST_COST: 0.008,
   DEATH_ORG: 0.6,
   NUT_PER_AREA: 2.0,       // nutrient locked into each unit of cell body
   NUT_UPTAKE: 0.06,
