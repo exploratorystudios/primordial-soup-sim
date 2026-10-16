@@ -5,3 +5,7 @@ video/*.mp4
 .DS_Store
 # Generated narration track (rebuild with node video/align-voiceover.mjs)
 video/*-voice.wav
+
+# Local Python environment (notebook tooling) and saved worlds
+.venv/
+primordial-soup-seed*.json.gz
