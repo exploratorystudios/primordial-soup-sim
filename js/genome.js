@@ -16,6 +16,25 @@ export const FIRST_SIGNED = W_LIGHT;
 // a weighted sum of [bias, #neighbours, depth from founder, colony size, light].
 export const DIFF = 27, NTYPES = 6, NDIFF_IN = 5;
 export const NG = DIFF + NTYPES * NDIFF_IN;
+// Body-plan (growth) genes, in [0, 1], after the regulatory block; they act, mutate and count only with CFG.MORPH.
+// Angle: how far each new cell turns from its parent's direction (straight = filament). Spread: how far apart a
+// cell's branches fan out. Branching: how many daughters a cell holds (1 = unbranched, up to 4). Alternate:
+// above 0.5 the turns alternate side by side and generation (zigzags, opposite branches) instead of curling.
+export const M_ANGLE = NG, M_SPREAD = NG + 1, M_BRANCH = NG + 2, M_SIDE = NG + 3, NGT = NG + 4;
+export const MORPH_NAMES = ['Growth angle', 'Branch spread', 'Branching', 'Alternate sides'];
+
+// Starting body-plan genes, from their own random stream (so the rest of the genome is drawn as before).
+export function morphInit(g, seed) {
+  const r = new RNG((seed ^ 0x5bd1e995) >>> 0);
+  g[M_ANGLE] = r.next() * 0.3; g[M_SPREAD] = r.next(); g[M_BRANCH] = r.next() * 0.5; g[M_SIDE] = r.next();
+  return g;
+}
+// A genome saved before the body-plan genes existed, given some.
+export function fitGenome(g, seed) {
+  if (g.length >= NGT) return g;
+  const x = new Float32Array(NGT); x.set(g);
+  return morphInit(x, seed);
+}
 
 export const GENE_NAMES = [
   'Size', 'Photosynthesis', 'Chemosynthesis', 'Heterotrophy', 'Predation', 'Motility', 'Aerobic resp.',
@@ -28,7 +47,7 @@ export const GENE_NAMES = [
 // It is an RNA-world cell: ribozymes do the chemistry and the genome is RNA.
 export function fromSequence(seq) {
   const r = new RNG(hashSeq(seq));
-  const g = new Float32Array(NG);
+  const g = new Float32Array(NGT);
   g[SIZE] = 0.25 + r.next() * 0.15;
   g[PHOTO] = r.next() * 0.04;
   g[CHEMO] = 0.6 + r.next() * 0.2;
@@ -57,7 +76,7 @@ export function fromSequence(seq) {
   g[W_FLEE] = r.next() * 0.3;
   g[W_OXY] = -r.next() * 0.2;
   for (let i = DIFF; i < NG; i++) g[i] = (r.next() - 0.5) * 0.3;
-  return g;
+  return morphInit(g, hashSeq(seq));
 }
 
 // rateMul < 1 for DNA genomes (proofreading and repair).
@@ -71,6 +90,13 @@ export function mutate(p, rng, rateMul = 1) {
     const lo = i >= FIRST_SIGNED ? -1 : 0;
     if (g[i] < lo) g[i] = lo; else if (g[i] > 1) g[i] = 1;
   }
+  if (CFG.MORPH) {
+    for (let i = NG; i < g.length; i++) {
+      if (rng.next() >= rate) continue;
+      if (rng.next() < 0.04) g[i] = rng.next(); else g[i] += rng.gauss() * 0.1;
+      if (g[i] < 0) g[i] = 0; else if (g[i] > 1) g[i] = 1;
+    }
+  }
   // Neutral pigment drifts every generation: a visible molecular clock.
   g[HUE] = (g[HUE] + rng.gauss() * 0.004 + 1) % 1;
   return g;
@@ -78,8 +104,8 @@ export function mutate(p, rng, rateMul = 1) {
 
 // Sexual reproduction: each gene comes from one parent or the other (free recombination).
 export function recombine(a, b, rng) {
-  const g = new Float32Array(a.length);
-  for (let i = 0; i < a.length; i++) g[i] = rng.next() < 0.5 ? a[i] : b[i];
+  const g = new Float32Array(a);
+  for (let i = 0, n = CFG.MORPH ? Math.min(a.length, b.length) : NG; i < n; i++) g[i] = rng.next() < 0.5 ? a[i] : b[i];
   return g;
 }
 
@@ -90,5 +116,7 @@ export function distance(a, b) {
     const d = Math.abs(a[i] - b[i]);
     s += i >= FIRST_SIGNED ? d * 0.5 : d;
   }
-  return s / (NG - 1);
+  if (!CFG.MORPH) return s / (NG - 1);
+  for (let i = NG; i < NGT; i++) s += Math.abs(a[i] - b[i]);
+  return s / (NGT - 1);
 }

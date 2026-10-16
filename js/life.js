@@ -40,6 +40,7 @@ export class Cell {
     this.bonds = [];
     this.type = parent && parent.bonds.length ? parent.type : T_GENERIC;
     this.org = this.id; this.orgSize = 1; this.depth = 0;
+    this.up = 0; // MORPH: the colony cell this one grew from (its body-plan 'parent' bond)
     this.gf = 1; // TRADEOFF / SPEC_BONUS: this colony cell's strength at its jobs
     this.para = false; this.paraT = 0; this.paraStart = 0; // PARATOMY: colony growing its copy, to what size, since when
     this.dead = false;
@@ -306,6 +307,60 @@ export class Life {
     }
   }
 
+  // ---------------------------------------------------------------- body plans (MORPH)
+  upCell(c) {
+    if (!c.up) return null;
+    for (const o of c.bonds) if (o.id === c.up) return o;
+    return null;
+  }
+  // Daughters a cell may hold: 1-4 by its branching gene; a colony's founder one more (filaments grow both ways).
+  maxDaughters(c, up) { return 1 + Math.floor(c.g[Gn.M_BRANCH] * 3.999) + (up ? 0 : 1); }
+  // Direction of a cell's k-th daughter: turned from the cell's own direction by its growth genes; the founder
+  // spaces its daughters evenly around itself.
+  morphAngle(c, k, up) {
+    const g = c.g;
+    if (!up) {
+      const f = c.bonds[0], a0 = f ? Math.atan2(f.y - c.y, f.x - c.x) : c.heading; // (its first daughter sets its axis)
+      return a0 + (k * 6.283185307) / this.maxDaughters(c, null);
+    }
+    let off = (g[Gn.M_ANGLE] + k * g[Gn.M_SPREAD]) * 1.5707963;
+    if (g[Gn.M_SIDE] > 0.5 && ((k + c.depth) & 1)) off = -off;
+    return Math.atan2(c.y - up.y, c.x - up.x) + off;
+  }
+  // Bond a newborn into its parent's colony where the body plan puts it: as a new daughter if the parent has room,
+  // otherwise inserted between the parent and its first daughter (growth along a filament).
+  attach(c, child) {
+    const up = this.upCell(c);
+    let nd = 0, first = null;
+    for (const o of c.bonds) if (o !== up) { if (!first) first = o; nd++; }
+    child.up = c.id;
+    const rest = (c.r + child.r) * 0.95;
+    if (nd < this.maxDaughters(c, up) || !first) {
+      const a = this.morphAngle(c, nd, up);
+      link(c, child);
+      child.x = child.x0 = c.x + Math.cos(a) * rest; child.y = child.y0 = c.y + Math.sin(a) * rest;
+    } else {
+      c.bonds[c.bonds.indexOf(first)] = child;
+      first.bonds[first.bonds.indexOf(c)] = child;
+      child.bonds.push(c, first);
+      first.up = child.id;
+      child.x = child.x0 = (c.x + first.x) / 2; child.y = child.y0 = (c.y + first.y) / 2;
+    }
+  }
+  // Angle springs: pull each daughter toward where the body plan puts it (and the cell the other way).
+  shapeForces(c) {
+    const up = this.upCell(c), K = CFG.MORPH_STIFF;
+    let k = 0;
+    for (const o of c.bonds) {
+      if (o === up) continue;
+      const a = this.morphAngle(c, k++, up);
+      if (o.dead) continue;
+      const rest = (c.r + o.r) * 0.95;
+      const dx = (c.x + Math.cos(a) * rest - o.x) * K, dy = (c.y + Math.sin(a) * rest - o.y) * K;
+      o.x += dx; o.y += dy; c.x -= dx; c.y -= dy;
+    }
+  }
+
   // Swim: sensing and the new heading (every third tick) were worked out in the steer phase.
   steer(c, tm, s) {
     const mot = c.motil * tm[4] * c.gf;
@@ -480,7 +535,7 @@ export class Life {
     // A colony growing its copy (PARATOMY) keeps every new cell, past its usual size limit.
     if (c.type !== T_GERM && c.bonds.length < CFG.MAX_BONDS && ((c.para && c.orgSize < c.paraT)
       || (c.orgSize < c.colMax && (!CFG.REALISTIC_MULTI || c.orgSize < this.bodyLimit(c)) && rng.next() < c.adh + CFG.ADH_BOOST))) {
-      link(c, child);
+      if (CFG.MORPH) this.attach(c, child); else link(c, child);
       child.org = c.org;
       child.orgSize = ++c.orgSize;
       child.type = c.type;
@@ -673,6 +728,7 @@ export class Life {
         c.nut -= nflow; o.nut += nflow;
       }
     }
+    if (CFG.MORPH) for (const c of cells) if (!c.dead && c.bonds.length) this.shapeForces(c);
     for (let i = 0; i < broken.length; i += 2) unlink(broken[i], broken[i + 1]);
 
     // Currents, plumes, jostling and walls: in parallel (move phase), from positions after the bonds.

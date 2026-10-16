@@ -2,6 +2,7 @@
 // so a run can be bookmarked and resumed exactly where it left off.
 import { World } from './world.js';
 import { Cell, decode } from './life.js';
+import * as Gn from './genome.js';
 
 const VERSION = 1;
 
@@ -43,7 +44,7 @@ export function serialize(w) {
       cells: L.cells.map((c) => ({
         id: c.id, x: c.x, y: c.y, vx: c.vx, vy: c.vy, g: b64(c.g), energy: c.energy, age: c.age, gen: c.gen, mito: c.mito, plastid: c.plastid,
         species: c.species, origin: c.origin, parentId: c.parentId, bonds: c.bonds.map((o) => o.id), type: c.type, org: c.org, orgSize: c.orgSize,
-        depth: c.depth, para: c.para, paraT: c.paraT, paraStart: c.paraStart, gf: c.gf, heading: c.heading, nut: c.nut, infected: c.infected, born: c.born, founderSeq: c.founderSeq, sexual: c.sexual,
+        depth: c.depth, para: c.para, paraT: c.paraT, paraStart: c.paraStart, gf: c.gf, up: c.up, heading: c.heading, nut: c.nut, infected: c.infected, born: c.born, founderSeq: c.founderSeq, sexual: c.sexual,
         px: c.px, py: c.py, fx: c.fx, fy: c.fy, dirX: c.dirX, dirY: c.dirY, // sensed directions and current heading
         r: c.r, rTarget: c.rTarget, endoT: c.endoT, mitoN: c.mitoN,
       })),
@@ -82,10 +83,10 @@ export function deserialize(d) {
 
   const L = w.life, D = d.life;
   Object.assign(L, { nextId: D.nextId, nextSpecies: D.nextSpecies, origins: D.origins, births: D.births, deaths: D.deaths, sexualBirths: D.sexualBirths, stats: D.stats });
-  L.species = new Map(D.species.map((s) => [s.id, { ...s, rep: unb64(s.rep, Float32Array) }]));
+  L.species = new Map(D.species.map((s) => [s.id, { ...s, rep: Gn.fitGenome(unb64(s.rep, Float32Array), s.id) }]));
   const byId = new Map();
   L.cells = D.cells.map((q) => {
-    const c = new Cell(q.id, q.x, q.y, unb64(q.g, Float32Array), null);
+    const c = new Cell(q.id, q.x, q.y, Gn.fitGenome(unb64(q.g, Float32Array), q.id), null);
     const { bonds, g, ...rest } = q;
     Object.assign(c, rest);
     c.x0 = c.x; c.y0 = c.y;

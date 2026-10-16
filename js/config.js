@@ -99,6 +99,10 @@ export const CFG = {
                            // more as colonies grow; cf. Volvox's flagellation constraint). 0 = off; try 0.4
   SPEC_BONUS: 0,           // division of labour pays: a specialist cell in a colony does its job (feeding, swimming,
                            // engulfing, armour) at 1 + SPEC_BONUS x min(1, (cells - 1) / 15) strength. 0 = off; try 0.5
+  MORPH: false,            // body plans: growth genes (angle, branch spread, branching, alternating sides) decide where
+                           // each new colony cell attaches, and angle springs hold the shape, so offspring regrow their
+                           // parent's form (or a mutated one). Filaments grow by inserting cells along their length.
+  MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
   COLONY_SWIM: false,      // a colony swims as one body: its cells' combined thrust over the colony's whole mass        // founders' colony-size gene starts in [0, this): limit 2 + gene x 60 cells            // added to every cell's chance that a daughter stays attached (its adhesion gene)
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
