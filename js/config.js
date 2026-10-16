@@ -84,6 +84,7 @@ export const CFG = {
   ADH_COST: 0.002,
   ADH_BOOST: 0,
   COLMAX_INIT: 0.1,
+  ADH_INIT: 0.06,          // founders' adhesion gene starts in [0, this): more variation for selection to act on
   SHARE_INIT: 0.2,         // founders' energy-sharing gene starts in [0, this)
   SHIELD: false,           // predators and viruses reach only a colony's exposed cells (inner cells are shielded)
   SHIELD_BONDS: 3,         // a cell bonded to at least this many neighbours counts as inner

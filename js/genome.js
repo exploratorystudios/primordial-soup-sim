@@ -56,7 +56,7 @@ export function fromSequence(seq) {
   g[MOTIL] = 0.1 + r.next() * 0.2;
   g[AEROBIC] = r.next() * 0.03;
   g[DIVTH] = 0.4 + r.next() * 0.3;
-  g[ADHES] = r.next() * 0.06;
+  g[ADHES] = r.next() * CFG.ADH_INIT;
   g[SHARE] = r.next() * CFG.SHARE_INIT;
   g[ARMOR] = r.next() * 0.05;
   g[MUTR] = 0.3 + r.next() * 0.2;
