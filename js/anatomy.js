@@ -92,6 +92,15 @@ export function buildAnatomy(c) {
     }
     a.lyso = scatter(rng, 3 + rng.int(4), 0.5, 0.85, avoid);
     a.perox = scatter(rng, 2 + rng.int(3), 0.5, 0.85, avoid);
+    // Drawn up close only (and drawn last, so nothing above moves): polysomes, proteasomes, clathrin-coated pits,
+    // food vacuoles (cells that eat), a contractile vacuole.
+    a.polysomes = scatter(rng, 6 + rng.int(5), 0.46, 0.9, avoid).map((q) => ({ ...q, n: 4 + rng.int(5) }));
+    a.proteasomes = scatter(rng, 16, 0.45, 0.92, avoid);
+    a.pits = [];
+    for (let k = 0; k < 7; k++) a.pits.push({ ang: rng.next() * TAU, stage: rng.next() });
+    a.food = c.effPred > 0.05 || c.effH > 0.3 ? scatter(rng, 1 + rng.int(3), 0.45, 0.75, avoid).map((q) => ({ ...q, prey: 0.3 + rng.next() * 0.6 })) : [];
+    const cvAng = rng.next() * TAU;
+    a.cv = { fx: Math.cos(cvAng) * 0.78, fy: Math.sin(cvAng) * 0.78, ph: rng.next() };
   }
   c._anat = a;
   return a;

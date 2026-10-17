@@ -57,6 +57,12 @@ function rectPts(x, y, ang, lx, ly, w, h) {
   return [w2(lx, ly), w2(lx + w, ly), w2(lx + w, ly + h), w2(lx, ly + h)];
 }
 
+// Proteins set through organelle membranes up close: the mitochondrial respiratory chain (complexes I, III and IV)
+// with ATP synthase; and the thylakoid's photosystem II with its light-harvesting antenna, cytochrome b6f,
+// photosystem I and ATP synthase.
+const RESP_CHAIN = { spacing: 14, types: [{ size: 18, color: 'rgba(110,190,255,0.95)' }, { size: 10, color: 'rgba(140,230,140,0.95)' }, { size: 9, color: 'rgba(200,150,255,0.95)' }, { size: 10, color: 'rgba(255,220,110,0.95)' }] };
+const PHOTO_CHAIN = { spacing: 18, types: [{ size: 20, color: 'rgba(60,220,120,0.95)' }, { size: 9, color: 'rgba(255,170,80,0.95)' }, { size: 14, color: 'rgba(80,200,210,0.95)' }, { size: 10, color: 'rgba(255,220,110,0.95)' }] };
+
 // A cell's wall seen from afar: peptidoglycan (bacteria), cellulose (algae) or a glycoprotein coat (other protists).
 const WALL_RGB = { prok: [205, 165, 105], alga: [190, 230, 180], coat: [200, 185, 235] };
 const wallKind = (c) => (!c.mito ? 'prok' : c.plastid ? 'alga' : 'coat');
@@ -1235,7 +1241,8 @@ export class Renderer {
       return;
     }
     const hr = DIM.lipidHead * NM, ds = DIM.lipidSpacing * NM, off = t / 2 - hr, tl = DIM.lipidTail * NM, pad = t * 3;
-    const core = new Path2D(), heads = new Path2D(), tails = this.pxnm >= 7 ? new Path2D() : null, protPath = prot ? new Path2D() : null;
+    const core = new Path2D(), heads = new Path2D(), tails = this.pxnm >= 7 ? new Path2D() : null;
+    const protPath = prot ? (prot.types || [prot]).map(() => new Path2D()) : null;
     let s0 = 0;
     for (let i = 0, segs = closed ? m : m - 1; i < segs; i++) {
       const p = pts[i], q = pts[(i + 1) % m], dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy);
@@ -1257,8 +1264,9 @@ export class Renderer {
       if (prot) {
         const sp = prot.spacing * NM;
         for (let k = Math.ceil(s0 / sp); k * sp < s0 + L; k++) {
-          const u = k * sp - s0, x = p.x + ux * u - cx, y = p.y + uy * u - cy, rx = (prot.size * NM) / 2, ry = (t + 3 * NM) / 2;
-          protPath.moveTo(x + rx * ux, y + rx * uy); protPath.ellipse(x, y, rx, ry, Math.atan2(uy, ux), 0, TAU);
+          const kind = prot.types ? (hash32(k, 77) >>> 3) % prot.types.length : 0, pr = prot.types ? prot.types[kind] : prot;
+          const u = k * sp - s0, x = p.x + ux * u - cx, y = p.y + uy * u - cy, rx = (pr.size * NM) / 2, ry = (t + 3 * NM) / 2;
+          protPath[kind].moveTo(x + rx * ux, y + rx * uy); protPath[kind].ellipse(x, y, rx, ry, Math.atan2(uy, ux), 0, TAU);
         }
       }
       s0 += L;
@@ -1266,7 +1274,7 @@ export class Renderer {
     ctx.strokeStyle = tail; ctx.lineWidth = t * 0.55; ctx.stroke(core);
     ctx.fillStyle = head; ctx.fill(heads);
     if (tails) { ctx.strokeStyle = 'rgba(210,190,130,0.8)'; ctx.lineWidth = 0.13 * NM; ctx.stroke(tails); }
-    if (protPath) { ctx.fillStyle = prot.color; ctx.fill(protPath); }
+    if (protPath) (prot.types || [prot]).forEach((pr, i) => { ctx.fillStyle = pr.color; ctx.fill(protPath[i]); });
   }
 
   drawBilayer(x, y, R, head, tail, twoTails = false, cell = null, opt = null) {
@@ -1497,6 +1505,240 @@ export class Renderer {
     ctx.stroke();
   }
 
+  // Heterochromatin: densely packed, mostly silent chromatin lining the nuclear envelope (the dark rim of real nuclei),
+  // around looser, active euchromatin. Up close, packed nucleosomes.
+  drawHeterochromatin(c, nr) {
+    const ctx = this.ctx, v = this.v, X = c.x - this.cam.x, Y = c.y - this.cam.y, band = Math.min(nr * 0.16, 350 * NM);
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    if (band * this.ppu < 2 || d - half > nr || d + half < nr - band) return;
+    const { mid, phi } = this.visibleArc(X, Y, nr - band / 2, d, half);
+    ctx.fillStyle = 'rgba(18,8,36,0.55)';
+    ctx.beginPath(); ctx.arc(X, Y, nr, mid - phi, mid + phi); ctx.arc(X, Y, nr - band, mid + phi, mid - phi, true); ctx.fill();
+    if (this.pxnm < 0.4) return;
+    ctx.fillStyle = 'rgba(150,120,210,0.85)';
+    ctx.beginPath();
+    for (let row = 0, rows = Math.min(12, Math.floor(band / (14 * NM))); row < rows; row++) {
+      const R = nr - 12 * NM - row * 14 * NM, da = (13 * NM) / R;
+      for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+        const j = (hash32(c.id + row, k) / 4294967296 - 0.5) * 6 * NM, t = k * da + (row & 1) * da * 0.5;
+        const x = X + Math.cos(t) * (R + j), y = Y + Math.sin(t) * (R + j);
+        ctx.moveTo(x + 5.5 * NM, y); ctx.arc(x, y, 5.5 * NM, 0, TAU);
+      }
+    }
+    ctx.fill();
+  }
+
+  // The nuclear lamina: a meshwork of thin lamin filaments (~3.5 nm) lining the inner nuclear membrane.
+  drawLamina(c, nr) {
+    if (this.pxnm < 0.6) return;
+    const ctx = this.ctx, v = this.v, X = c.x - this.cam.x, Y = c.y - this.cam.y;
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2, d = Math.hypot(X, Y);
+    if (d - half > nr || d + half < nr - 40 * NM) return;
+    const { mid, phi } = this.visibleArc(X, Y, nr - 15 * NM, d, half), da = (25 * NM) / nr;
+    const P = (k) => { const R = nr - (k & 1 ? 24 : 9) * NM - (hash32(c.id, k) / 4294967296) * 4 * NM, t = k * da; return [X + Math.cos(t) * R, Y + Math.sin(t) * R]; };
+    ctx.strokeStyle = 'rgba(255,190,120,0.65)'; ctx.lineWidth = Math.max(3.5 * NM, 0.5 * this.px);
+    ctx.beginPath();
+    for (let k = Math.floor((mid - phi) / da); k <= Math.ceil((mid + phi) / da); k++) {
+      const [x, y] = P(k), [x2, y2] = P(k + 1), [x3, y3] = P(k + 2);
+      ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.moveTo(x, y); ctx.lineTo(x3, y3);
+    }
+    ctx.stroke();
+  }
+
+  // The nucleolus, where ribosomes are made: pale fibrillar centres, each wrapped in a dense fibrillar component where
+  // rRNA genes are transcribed (up close, "Christmas trees": RNA polymerase I packed along a gene, the growing rRNAs
+  // getting longer toward its end), in a granular component of ribosome subunits being assembled.
+  drawNucleolus(c, a, nr) {
+    const ctx = this.ctx, ox = c.x + a.nuc.fx * nr, oy = c.y + a.nuc.fy * nr, R = nr * 0.3, X = ox - this.cam.x, Y = oy - this.cam.y, pxnm = this.pxnm;
+    ctx.fillStyle = 'rgba(100,70,150,0.95)';
+    ctx.beginPath(); ctx.arc(X, Y, R, 0, TAU); ctx.fill();
+    if (R * this.ppu < 8 || !this.inView(ox, oy, R)) return;
+    const fcs = [];
+    for (let q = 0; q < 4; q++) { const t = (hash32(c.id, q + 900) / 4294967296) * TAU, rr = (0.2 + 0.4 * (hash32(c.id, q + 950) / 4294967296)) * R; fcs.push({ x: ox + Math.cos(t) * rr, y: oy + Math.sin(t) * rr, r: R * 0.14, t }); }
+    if (pxnm >= 1) {
+      // Granular component: pre-ribosomal particles (~15 nm), only those on screen.
+      const v = this.v, sp = 22 * NM;
+      ctx.fillStyle = 'rgba(185,150,230,0.9)';
+      ctx.beginPath();
+      for (let gx = Math.floor(Math.max(v.x0, ox - R) / sp); gx * sp <= Math.min(v.x1, ox + R); gx++) for (let gy = Math.floor(Math.max(v.y0, oy - R) / sp); gy * sp <= Math.min(v.y1, oy + R); gy++) {
+        const x = gx * sp + ((hash32(gx, gy) & 255) / 255 - 0.5) * 8 * NM, y = gy * sp + ((hash32(gy, gx) & 255) / 255 - 0.5) * 8 * NM;
+        if ((x - ox) ** 2 + (y - oy) ** 2 > R * R || fcs.some((f) => (x - f.x) ** 2 + (y - f.y) ** 2 < (f.r * 1.6) ** 2)) continue;
+        ctx.moveTo(x - this.cam.x + 7.5 * NM, y - this.cam.y); ctx.arc(x - this.cam.x, y - this.cam.y, 7.5 * NM, 0, TAU);
+      }
+      ctx.fill();
+    }
+    for (const f of fcs) {
+      ctx.fillStyle = 'rgba(160,120,210,0.95)'; ctx.beginPath(); ctx.arc(f.x - this.cam.x, f.y - this.cam.y, f.r * 1.5, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(215,200,245,0.95)'; ctx.beginPath(); ctx.arc(f.x - this.cam.x, f.y - this.cam.y, f.r, 0, TAU); ctx.fill();
+      if (pxnm >= 2) {
+        // A Miller spread across the dense fibrillar component.
+        const ux = Math.cos(f.t + 1.2), uy = Math.sin(f.t + 1.2), len = f.r * 2.4, x0 = f.x - ux * len / 2 - this.cam.x, y0 = f.y - uy * len / 2 - this.cam.y;
+        ctx.strokeStyle = 'rgba(225,235,255,0.9)'; ctx.lineWidth = DIM.dna * NM;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + ux * len, y0 + uy * len); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,157,232,0.85)'; ctx.lineWidth = 1 * NM;
+        const n = Math.floor(len / (9 * NM));
+        ctx.beginPath();
+        for (let q = 0; q < n; q++) { const s2 = q * 9 * NM, L2 = (q / n) * f.r * 0.8, side = q & 1 ? 1 : -1, bx = x0 + ux * s2, by = y0 + uy * s2; ctx.moveTo(bx, by); ctx.lineTo(bx - uy * L2 * side, by + ux * L2 * side); }
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,120,90,0.95)';
+        for (let q = 0; q < n; q++) { const s2 = q * 9 * NM; ctx.beginPath(); ctx.arc(x0 + ux * s2, y0 + uy * s2, 3.5 * NM, 0, TAU); ctx.fill(); }
+      }
+    }
+  }
+
+  // Traffic through the nuclear pores: pre-ribosomal subunits from the nucleolus and finished messenger RNAs (with
+  // their proteins) leaving for the cytoplasm.
+  drawNuclearTraffic(c, a, nr) {
+    if (12 * NM * this.ppu < 1.2) return;
+    const ctx = this.ctx, pores = nuclearPores(c), np = pores.length, cx = this.cam.x, cy = this.cam.y;
+    if (!np) return;
+    const nu = { x: c.x + a.nuc.fx * nr, y: c.y + a.nuc.fy * nr };
+    for (let i = 0; i < 24; i++) {
+      const p = pores[hash32(c.id, i + 300) % np], ribo = i % 3 !== 0, u = ((this.time * 0.003 + hash32(c.id, i + 400) / 4294967296) % 1);
+      const s = ribo ? nu : { x: c.x + (p.x - c.x) * 0.5, y: c.y + (p.y - c.y) * 0.5 };
+      const ex = p.x + (p.x - c.x) / nr * 300 * NM, ey = p.y + (p.y - c.y) / nr * 300 * NM;
+      const x = u < 0.8 ? s.x + (p.x - s.x) * (u / 0.8) : p.x + (ex - p.x) * ((u - 0.8) / 0.2), y = u < 0.8 ? s.y + (p.y - s.y) * (u / 0.8) : p.y + (ey - p.y) * ((u - 0.8) / 0.2);
+      if (!this.inView(x, y, 20 * NM)) continue;
+      ctx.fillStyle = ribo ? 'rgba(190,160,240,0.95)' : 'rgba(255,157,232,0.95)';
+      ctx.beginPath(); ctx.arc(x - cx, y - cy, (ribo ? 12 : 8) * NM, 0, TAU); ctx.fill();
+    }
+  }
+
+  // RuBisCO in the stroma (outside the pyrenoid too), only near the camera.
+  drawStromaRubisco(c, p, L, W) {
+    const ctx = this.ctx, v = this.v, sp = 32 * NM, ox = c.x + p.fx * c.r, oy = c.y + p.fy * c.r, ca = Math.cos(p.ang), sa = Math.sin(p.ang), gr = grana(L, W);
+    ctx.fillStyle = 'rgba(150,230,150,0.75)';
+    ctx.beginPath();
+    for (let gx = Math.floor(v.x0 / sp); gx * sp <= v.x1; gx++) for (let gy = Math.floor(v.y0 / sp); gy * sp <= v.y1; gy++) {
+      const x = gx * sp + ((hash32(gx, gy + 7) & 255) / 255) * 14 * NM, y = gy * sp + ((hash32(gy, gx + 7) & 255) / 255) * 14 * NM;
+      const lx = (x - ox) * ca + (y - oy) * sa, ly = -(x - ox) * sa + (y - oy) * ca;
+      if ((lx / (L * 0.46)) ** 2 + (ly / (W * 0.46)) ** 2 > 1) continue;
+      if (gr.some((g) => g.discs.some((d) => lx > d.x && lx < d.x + d.w && ly > d.y - 4 * NM && ly < d.y + d.h + 4 * NM))) continue;
+      ctx.moveTo(x - this.cam.x + 5.5 * NM, y - this.cam.y); ctx.arc(x - this.cam.x, y - this.cam.y, 5.5 * NM, 0, TAU);
+    }
+    ctx.fill();
+  }
+
+  // Polysomes: several ribosomes reading one messenger RNA at once, each trailing its growing protein.
+  drawPolysomes(c, a) {
+    const rb = (DIM.ribosome * NM) / 2, ppu = this.ppu;
+    if (rb * 2 * ppu < 1.5) return;
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y, sp = 32 * NM;
+    for (const q of a.polysomes) {
+      const ox = c.x + q.fx * c.r, oy = c.y + q.fy * c.r, len = (q.n + 1) * sp, ux = Math.cos(q.ang), uy = Math.sin(q.ang);
+      if (!this.inView(ox, oy, len)) continue;
+      const pt = (s2) => { const w = Math.sin(s2 / (60 * NM)) * 15 * NM; return [ox + ux * (s2 - len / 2) - uy * w, oy + uy * (s2 - len / 2) + ux * w]; };
+      ctx.strokeStyle = 'rgba(255,157,232,0.9)'; ctx.lineWidth = Math.max(1 * NM, 0.5 * this.px);
+      ctx.beginPath(); for (let s2 = 0; s2 <= len; s2 += 4 * NM) { const [x, y] = pt(s2); if (s2) ctx.lineTo(x - cx, y - cy); else ctx.moveTo(x - cx, y - cy); } ctx.stroke();
+      for (let k = 1; k <= q.n; k++) {
+        const [x, y] = pt(k * sp);
+        if (rb * 2 * ppu >= 12) { // a growing protein chain, longer on ribosomes further along the message
+          ctx.strokeStyle = 'rgba(255,230,140,0.9)'; ctx.lineWidth = 0.8 * NM; ctx.beginPath(); ctx.moveTo(x - cx, y - cy);
+          for (let j = 1; j <= k * 4; j++) ctx.lineTo(x - cx + uy * j * 2.5 * NM + Math.sin(j) * 1.5 * NM, y - cy - ux * j * 2.5 * NM + Math.cos(j) * 1.5 * NM);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(70,45,110,0.95)'; ctx.beginPath(); ctx.arc(x - cx, y - cy, rb, 0, TAU); ctx.fill(); // large subunit
+        ctx.fillStyle = 'rgba(130,100,180,0.95)'; ctx.beginPath(); ctx.arc(x - cx - uy * rb * 0.55, y - cy + ux * rb * 0.55, rb * 0.62, 0, TAU); ctx.fill(); // small subunit
+      }
+    }
+  }
+
+  // Proteasomes (~45 × 15 nm): a barrel of four stacked rings that digests unwanted proteins, capped at each end by a
+  // regulatory particle that recognises them (by their ubiquitin tags) and unfolds them.
+  drawProteasomes(c, a) {
+    if (15 * NM * this.ppu < 2) return;
+    const ctx = this.ctx;
+    for (const q of a.proteasomes) {
+      const x = c.x + q.fx * c.r, y = c.y + q.fy * c.r;
+      if (!this.inView(x, y, 30 * NM)) continue;
+      ctx.save(); ctx.translate(x - this.cam.x, y - this.cam.y); ctx.rotate(q.ang);
+      for (let k = 0; k < 4; k++) { ctx.fillStyle = k === 1 || k === 2 ? 'rgba(120,200,180,0.95)' : 'rgba(90,170,160,0.95)'; ctx.fillRect(-14 * NM + k * 7 * NM, -6 * NM, 6.5 * NM, 12 * NM); }
+      ctx.fillStyle = 'rgba(200,230,150,0.95)';
+      for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(sx * 19 * NM, 0, 4.5 * NM, 8 * NM, 0, 0, TAU); ctx.fill(); }
+      ctx.restore();
+    }
+  }
+
+  // Protein import into the rough ER: each bound ribosome sits on a translocon (Sec61) and threads its new protein
+  // straight through the membrane into the lumen as it is made.
+  drawTranslocons(c, a) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    for (const q of erRibosomes(c, a)) {
+      if (!this.inView(q.x, q.y, 40 * NM)) continue;
+      const dx = q.x - c.x, dy = q.y - c.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      const tx = q.x - ux * 13 * NM, ty = q.y - uy * 13 * NM;
+      ctx.save(); ctx.translate(tx - cx, ty - cy); ctx.rotate(Math.atan2(uy, ux));
+      ctx.fillStyle = 'rgba(140,255,200,0.9)'; ctx.fillRect(-4 * NM, -2.5 * NM, 8 * NM, 5 * NM);
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,230,140,0.9)'; ctx.lineWidth = 0.8 * NM; ctx.beginPath(); ctx.moveTo(q.x - cx, q.y - cy);
+      for (let j = 1; j <= 12; j++) ctx.lineTo(q.x - ux * j * 3 * NM - cx + Math.sin(j * 1.7) * 1.5 * NM, q.y - uy * j * 3 * NM - cy + Math.cos(j * 1.7) * 1.5 * NM);
+      ctx.stroke();
+    }
+  }
+
+  // Clathrin-coated pits budding in from the plasma membrane (endocytosis) and the coated vesicles they pinch off:
+  // a cage of three-legged clathrin units (~100 nm across).
+  drawClathrin(c, a) {
+    const pr = 50 * NM;
+    if (pr * this.ppu < 3) return;
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    for (const q of a.pits) {
+      const ux = Math.cos(q.ang), uy = Math.sin(q.ang), free = q.stage > 0.8, dep = free ? 220 * NM : pr * (0.2 + q.stage);
+      const x = c.x + ux * (c.r - dep), y = c.y + uy * (c.r - dep);
+      if (!this.inView(x, y, pr * 2)) continue;
+      const a0 = free ? 0 : q.ang + Math.PI / 2, a1 = free ? TAU : q.ang + Math.PI * 1.5;
+      ctx.strokeStyle = 'rgba(240,235,215,0.9)'; ctx.lineWidth = Math.max(4 * NM, 0.6 * this.px);
+      ctx.beginPath(); ctx.arc(x - cx, y - cy, pr, a0, a1); ctx.stroke(); // its membrane
+      ctx.strokeStyle = 'rgba(255,235,150,0.85)'; ctx.lineWidth = Math.max(3 * NM, 0.5 * this.px);
+      ctx.beginPath();
+      const nv = 12;
+      for (let k = 0; k <= nv; k++) {
+        const t = a0 + (a1 - a0) * (k / nv), t2 = a0 + (a1 - a0) * ((k + 1) / nv), R = pr + 12 * NM;
+        if (k < nv) { ctx.moveTo(x - cx + Math.cos(t) * R, y - cy + Math.sin(t) * R); ctx.lineTo(x - cx + Math.cos(t2) * R, y - cy + Math.sin(t2) * R); }
+        ctx.moveTo(x - cx + Math.cos(t) * R, y - cy + Math.sin(t) * R); ctx.lineTo(x - cx + Math.cos(t) * (pr + 3 * NM), y - cy + Math.sin(t) * (pr + 3 * NM));
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Food vacuoles in cells that eat: engulfed bacteria being digested, lysosomes fusing in to deliver enzymes.
+  drawFoodVacuoles(c, a) {
+    const ctx = this.ctx, cx = this.cam.x, cy = this.cam.y;
+    for (const f of a.food) {
+      const R = 500 * NM * f.s, x = c.x + f.fx * c.r, y = c.y + f.fy * c.r;
+      if (R * this.ppu < 4 || !this.inView(x, y, R * 1.3)) continue;
+      ctx.fillStyle = 'rgba(120,90,70,0.35)'; ctx.beginPath(); ctx.arc(x - cx, y - cy, R, 0, TAU); ctx.fill();
+      if (DIM.lipidSpacing * this.pxnm >= 2.5) this.drawBilayer(x, y, R, 'rgba(240,225,200,0.95)', 'rgba(200,170,130,0.45)', true);
+      else { ctx.strokeStyle = 'rgba(240,225,200,0.8)'; ctx.lineWidth = Math.max(5 * NM, 0.7 * this.px); ctx.beginPath(); ctx.arc(x - cx, y - cy, R, 0, TAU); ctx.stroke(); }
+      const k = f.prey; // what's left of the prey
+      ctx.fillStyle = `rgba(150,195,120,${(0.25 + 0.55 * k).toFixed(2)})`;
+      ctx.beginPath(); ctx.ellipse(x - cx, y - cy, R * 0.6 * k + R * 0.1, R * 0.28 * k + R * 0.06, f.ang, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(180,200,140,0.6)';
+      for (let q = 0; q < 6; q++) { const t = (q / 6) * TAU + f.ang, rr = R * (0.45 + 0.1 * (q & 1)); ctx.beginPath(); ctx.arc(x - cx + Math.cos(t) * rr, y - cy + Math.sin(t) * rr, R * 0.05, 0, TAU); ctx.fill(); }
+      ctx.fillStyle = 'rgba(255,120,140,0.7)';
+      ctx.beginPath(); ctx.arc(x - cx + Math.cos(f.ang + 2) * R, y - cy + Math.sin(f.ang + 2) * R, R * 0.22, 0, TAU); ctx.fill(); // a lysosome fusing
+    }
+  }
+
+  // A contractile vacuole: it slowly fills with water drawn from the cytoplasm through its spongiome tubules, then
+  // empties out of the cell in a quick pulse (protists in fresh or brackish water need one to avoid swelling).
+  drawContractileVacuole(c, a) {
+    const Rm = 600 * NM;
+    if (Rm * this.ppu < 4) return;
+    const ctx = this.ctx, q = a.cv, x = c.x + q.fx * c.r, y = c.y + q.fy * c.r;
+    if (!this.inView(x, y, Rm * 2)) return;
+    const u = (this.time / 150 + q.ph) % 1, R = u < 0.85 ? Rm * Math.sqrt(u / 0.85) : Rm * (1 - (u - 0.85) / 0.15);
+    const X = x - this.cam.x, Y = y - this.cam.y;
+    ctx.strokeStyle = 'rgba(170,220,255,0.5)'; ctx.lineWidth = Math.max(40 * NM, 0.6 * this.px);
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) { const t = (k / 8) * TAU + q.ph * 6; ctx.moveTo(X + Math.cos(t) * Math.max(R, 150 * NM), Y + Math.sin(t) * Math.max(R, 150 * NM)); ctx.lineTo(X + Math.cos(t) * (Math.max(R, 150 * NM) + 450 * NM), Y + Math.sin(t) * (Math.max(R, 150 * NM) + 450 * NM)); }
+    ctx.stroke();
+    if (R > 5 * NM) {
+      ctx.fillStyle = 'rgba(170,220,255,0.35)'; ctx.beginPath(); ctx.arc(X, Y, R, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(210,240,255,0.85)'; ctx.lineWidth = Math.max(5 * NM, 0.6 * this.px); ctx.beginPath(); ctx.arc(X, Y, R, 0, TAU); ctx.stroke();
+    }
+  }
+
   // The actin cortex: a meshwork of 7 nm actin filaments ~20-150 nm under the plasma membrane, giving the cell its
   // shape and its crawling movements. Up close each filament is two twisted strands of actin subunits (~5.5 nm,
   // a half-turn every ~37 nm).
@@ -1694,6 +1936,9 @@ export class Renderer {
       if (lipids) for (const side of [-1, 1]) this.drawBilayerPath(arcPts(c.x, c.y, e.rr * r + side * 25 * NM, e.a0, e.span, 120), false, 'rgba(215,195,250,0.95)', 'rgba(170,150,210,0.45)');
     }
     if (rib * 2 * ppu >= 0.8) drawRibos(erRibosomes(c, a), c.id * 4099 + 100000);
+    if (pxnm >= 1) this.drawTranslocons(c, a);
+    this.drawPolysomes(c, a);
+    this.drawProteasomes(c, a);
     // Golgi apparatus: a stack of flattened cisternae, budding transport vesicles.
     ctx.strokeStyle = 'rgba(255,200,120,0.85)';
     ctx.lineWidth = line(30);
@@ -1725,14 +1970,17 @@ export class Renderer {
     for (const l of a.lyso) blob(l.fx, l.fy, 250 * NM * l.s, 'rgba(255,120,140,0.6)', 'rgba(255,170,180,0.8)');
     for (const l of a.perox) blob(l.fx, l.fy, 200 * NM * l.s, 'rgba(255,240,140,0.55)', 'rgba(255,250,190,0.8)');
     if (a.vacuole) blob(a.vacuole.fx, a.vacuole.fy, a.vacuole.r * r, 'rgba(150,200,255,0.25)', 'rgba(190,225,255,0.7)');
+    this.drawFoodVacuoles(c, a);
+    this.drawContractileVacuole(c, a);
+    this.drawClathrin(c, a);
     // Nucleus with double envelope, pores, chromatin and nucleolus.
     const nr = 0.34 * r;
     ctx.fillStyle = 'rgba(40,25,70,0.85)';
     if (this.bigDisk(X, Y, nr)) ctx.fill();
+    this.drawHeterochromatin(c, nr);
     this.drawGenome(c, a.chrom, c.x, c.y, nr, 'chromatin');
     this.drawGeneActivity(c, a.chrom, c.x, c.y, nr);
-    ctx.fillStyle = 'rgba(100,70,150,0.95)';
-    ctx.beginPath(); ctx.arc(X + a.nuc.fx * nr, Y + a.nuc.fy * nr, nr * 0.3, 0, TAU); ctx.fill();
+    this.drawNucleolus(c, a, nr);
     const gap = DIM.nuclearGap * NM;
     if (lipids) { // the envelope: two bilayers ~30 nm apart (the outer one continues into the ER)
       this.drawBilayer(c.x, c.y, nr + DIM.bilayer * NM, 'rgba(225,205,255,0.95)', 'rgba(185,160,230,0.45)', true);
@@ -1758,6 +2006,8 @@ export class Renderer {
         }
       }
     }
+    this.drawLamina(c, nr);
+    this.drawNuclearTraffic(c, a, nr);
     // Chloroplasts with stacked thylakoids (grana).
     for (const p of a.plast) {
       const { L, W } = plastSize(c);
@@ -1774,6 +2024,17 @@ export class Renderer {
         // cpDNA
         ctx.strokeStyle = 'rgba(225,235,255,0.6)'; ctx.lineWidth = line(DIM.dna);
         ctx.beginPath(); ctx.ellipse(L * 0.3, W * 0.22, W * 0.08, W * 0.05, 0, 0, TAU); ctx.stroke();
+        // Plastoglobuli (lipid droplets) and starch grains in the stroma.
+        ctx.fillStyle = 'rgba(255,215,80,0.9)';
+        for (let q = 0; q < 4; q++) { ctx.beginPath(); ctx.arc((q - 1.5) * L * 0.16, W * 0.4, (35 + 15 * (q & 1)) * NM, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = 'rgba(245,245,232,0.92)';
+        for (const sx of [-0.42, 0.42]) { ctx.beginPath(); ctx.ellipse(sx * L, 0.04 * W, 130 * NM, 65 * NM, 0, 0, TAU); ctx.fill(); }
+        // The eyespot (algae): layers of orange carotenoid globules under the envelope on the cell's surface side,
+        // shading a light sensor so the cell can tell which way the light comes from.
+        if (c.plastid && p === a.plast[0]) {
+          ctx.fillStyle = 'rgba(255,140,40,0.95)';
+          for (const row of [-0.33, -0.27]) for (let q = -2; q <= 2; q++) { ctx.beginPath(); ctx.arc(L * 0.3 + q * 90 * NM, row * W, 40 * NM, 0, TAU); ctx.fill(); } // (along the edge from the pyrenoid, inside the envelope)
+        }
         // Pyrenoid: a dense body of RuBisCO (the CO₂-fixing enzyme) in a sheath of starch plates, where algae
         // concentrate CO₂ (a CO₂-concentrating mechanism, like a bacterium's carboxysome).
         const pr = W * 0.1, pxc = 0, pyc = -W * 0.3; // (between the grana and the envelope)
@@ -1797,12 +2058,13 @@ export class Renderer {
         }
       }
       ctx.restore();
+      if (11 * NM * pxnm >= 1.5) this.drawStromaRubisco(c, p, L, W);
       if (lipids) {
         // A double envelope (~10 nm apart), and each thylakoid disc a sac of membrane holding the photosystems.
         const px0 = c.x + p.fx * r, py0 = c.y + p.fy * r, e = 10 * NM + DIM.bilayer * NM;
         this.drawBilayerPath(ellipsePts(px0, py0, L / 2, W / 2, p.ang), true, 'rgba(170,240,170,0.95)', 'rgba(60,140,70,0.5)');
         this.drawBilayerPath(ellipsePts(px0, py0, L / 2 - e, W / 2 - e, p.ang), true, 'rgba(170,240,170,0.95)', 'rgba(60,140,70,0.5)');
-        for (const g of grana(L, W)) for (const d of g.discs) this.drawBilayerPath(rectPts(px0, py0, p.ang, d.x, d.y, d.w, d.h), true, 'rgba(150,255,160,0.95)', 'rgba(40,120,50,0.5)');
+        for (const g of grana(L, W)) for (const d of g.discs) this.drawBilayerPath(rectPts(px0, py0, p.ang, d.x, d.y, d.w, d.h), true, 'rgba(150,255,160,0.95)', 'rgba(40,120,50,0.5)', PHOTO_CHAIN);
       }
     }
     // Mitochondria (~1 × 0.5 µm) with folded inner membranes (cristae).
@@ -1827,6 +2089,10 @@ export class Renderer {
         // mtDNA loop in the matrix.
         ctx.strokeStyle = 'rgba(225,235,255,0.7)'; ctx.lineWidth = line(DIM.dna);
         ctx.beginPath(); ctx.ellipse(L * 0.18, 0, W * 0.12, W * 0.08, 0, 0, TAU); ctx.stroke();
+        if (pxnm >= 2) { // a nucleoid: the mtDNA packed by TFAM proteins
+          ctx.fillStyle = 'rgba(255,255,200,0.9)';
+          for (let q = 0; q < 14; q++) { const t = (q / 14) * TAU; ctx.beginPath(); ctx.arc(L * 0.18 + Math.cos(t) * W * 0.12, Math.sin(t) * W * 0.08, 2.5 * NM, 0, TAU); ctx.fill(); }
+        }
         // Mitoribosomes (~25 nm, bacteria-like: a relic of the mitochondrion's origin) make a few of its proteins.
         if (25 * NM * pxnm >= 1.5) {
           ctx.fillStyle = 'rgba(255,240,200,0.9)';
@@ -1852,10 +2118,10 @@ export class Renderer {
         const mx = c.x + m.fx * r, my = c.y + m.fy * r, e = 15 * NM + DIM.bilayer * NM, ca = Math.cos(m.ang), sa = Math.sin(m.ang);
         const w2 = (u, v) => ({ x: mx + u * ca - v * sa, y: my + u * sa + v * ca });
         this.drawBilayerPath(ellipsePts(mx, my, L / 2, W / 2, m.ang), true, 'rgba(255,190,160,0.95)', 'rgba(190,100,70,0.5)', { spacing: 22, size: 3.5, color: 'rgba(140,200,255,0.95)' });
-        this.drawBilayerPath(ellipsePts(mx, my, L / 2 - e, W / 2 - e, m.ang), true, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)');
+        this.drawBilayerPath(ellipsePts(mx, my, L / 2 - e, W / 2 - e, m.ang), true, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)', RESP_CHAIN);
         for (const k of cristae(L, W)) for (const side of [-1, 1]) {
           const pts = []; for (let q = 0; q <= 12; q++) pts.push(w2(k.x + side * 10 * NM, k.y1 + (k.y2 - k.y1) * (q / 12)));
-          this.drawBilayerPath(pts, false, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)');
+          this.drawBilayerPath(pts, false, 'rgba(255,170,130,0.95)', 'rgba(180,90,60,0.5)', RESP_CHAIN);
         }
       }
     }
@@ -2096,6 +2362,15 @@ export class Renderer {
         // Bases of the new message, every ~0.6 nm along it.
         for (let i = 1; i < tail.length; i++) { ctx.fillStyle = MONO_COLORS[hash32(c.id * 31 + pol.k, i) & 3]; ctx.fillRect(tail[i].x - cx - 0.15 * NM, tail[i].y - cy - 0.15 * NM, 0.3 * NM, 0.3 * NM); }
       }
+      if (c.mito && !pol.done && this.pxnm >= 1.5 && L > 60 * NM) {
+        // Splicing as the message is made: spliceosomes (~25 nm) cut out introns, which leave as small loops (lariats).
+        for (const f of [0.35, 0.7]) {
+          const t = tail[Math.min(NS, Math.round(f * NS))];
+          ctx.fillStyle = 'rgba(120,230,195,0.92)'; ctx.beginPath(); ctx.arc(t.x - cx, t.y - cy, 12 * NM, 0, TAU); ctx.fill();
+          ctx.strokeStyle = 'rgba(255,157,232,0.9)'; ctx.lineWidth = Math.max(1 * NM, 0.5 * px);
+          ctx.beginPath(); ctx.arc(t.x - cx + nn.y * 22 * NM, t.y - cy - nn.x * 22 * NM, 9 * NM, 0, TAU); ctx.stroke();
+        }
+      }
       if (!c.mito && L > 0.2) {
         // Coupled transcription–translation: ribosomes ride the message as it is made.
         ctx.fillStyle = 'rgba(40,25,70,0.85)';
@@ -2130,7 +2405,7 @@ export class Renderer {
     const ctx = this.ctx, X = cx - this.cam.x, Y = cy - this.cam.y, pxnm = this.pxnm;
     const w = mode === 'chromatin' ? 30 : DIM.dna;
     const detailed = mode === 'chromatin' ? pxnm >= 0.4 : pxnm >= 2;
-    if (detailed && mode === 'chromatin') {
+    if (detailed && mode === 'chromatin' && pxnm < 6) {
       // Close up, chromatin is "beads on a string": thin linker DNA between nucleosomes.
       ctx.strokeStyle = 'rgba(225,235,255,0.7)';
       ctx.lineWidth = Math.max(DIM.dna * NM, 0.7 * this.px);
@@ -2194,17 +2469,56 @@ export class Renderer {
   }
 
   drawNucleosomes(x1, y1, x2, y2, seed, seg) {
-    // DNA wraps 1.65 turns round a histone core every ~200 base pairs (~11 nm beads on a string).
-    const ctx = this.ctx, L = Math.hypot(x2 - x1, y2 - y1) / NM, n = Math.max(1, Math.floor(L / 25));
-    ctx.fillStyle = 'rgba(205,180,255,0.9)';
-    ctx.strokeStyle = 'rgba(240,230,255,0.9)';
-    ctx.lineWidth = Math.max(2 * NM, 0.6 * this.px);
+    // DNA wraps 1.65 turns round a histone core every ~200 base pairs (~11 nm beads on a string). Up close: the core's
+    // eight histones (two each of H2A, H2B, H3 and H4) with their tails, the DNA as a double helix (147 base pairs
+    // round the core, the linker between cores), and an H1 histone where the DNA enters and leaves.
+    const ctx = this.ctx, L = Math.hypot(x2 - x1, y2 - y1) / NM, n = Math.max(1, Math.floor(L / 25)), pxnm = this.pxnm, cx = this.cam.x, cy = this.cam.y;
+    const ux = (x2 - x1) / (L * NM || 1), uy = (y2 - y1) / (L * NM || 1), Rw = 6.2 * NM;
     for (let k = 0; k < n; k++) {
-      const f = (k + 0.5) / n, x = x1 + (x2 - x1) * f - this.cam.x, y = y1 + (y2 - y1) * f - this.cam.y;
-      ctx.beginPath(); ctx.arc(x, y, 5.5 * NM, 0, TAU); ctx.fill();
-      if (this.pxnm >= 3) { ctx.beginPath(); ctx.arc(x, y, 5.9 * NM, 0.3, 0.3 + TAU * 0.82); ctx.stroke(); }
+      const f = (k + 0.5) / n, wx = x1 + (x2 - x1) * f, wy = y1 + (y2 - y1) * f, x = wx - cx, y = wy - cy;
+      if (pxnm < 3) {
+        ctx.fillStyle = 'rgba(205,180,255,0.9)'; ctx.beginPath(); ctx.arc(x, y, 5.5 * NM, 0, TAU); ctx.fill();
+        continue;
+      }
+      // Histone octamer: two layers of four.
+      const H = ['rgba(255,170,190,0.95)', 'rgba(255,215,140,0.95)', 'rgba(160,200,255,0.95)', 'rgba(170,240,170,0.95)'];
+      for (let q = 0; q < 8; q++) {
+        const t = (q / 8) * TAU + seed, rr = q & 1 ? 2.2 * NM : 3.4 * NM;
+        ctx.fillStyle = H[q % 4]; ctx.beginPath(); ctx.arc(x + Math.cos(t) * rr, y + Math.sin(t) * rr, 2.1 * NM, 0, TAU); ctx.fill();
+      }
+      if (pxnm >= 5) { // N-terminal tails, where marks like acetylation switch genes on and off
+        ctx.strokeStyle = 'rgba(255,230,200,0.8)'; ctx.lineWidth = 0.4 * NM; ctx.beginPath();
+        for (let q = 0; q < 8; q++) { const t = (q / 8) * TAU + seed + 0.4; ctx.moveTo(x + Math.cos(t) * 5 * NM, y + Math.sin(t) * 5 * NM); ctx.quadraticCurveTo(x + Math.cos(t + 0.3) * 8 * NM, y + Math.sin(t + 0.3) * 8 * NM, x + Math.cos(t - 0.1) * 10 * NM, y + Math.sin(t - 0.1) * 10 * NM); }
+        ctx.stroke();
+      }
+      if (pxnm >= 6) {
+        // The wrapped DNA: 1.65 turns, a double helix with base pairs (a turn of the helix every 3.4 nm).
+        const turns = 1.65, steps = 220, a0 = Math.atan2(uy, ux) + Math.PI;
+        for (const ph of [0, Math.PI * 0.8]) {
+          ctx.strokeStyle = ph ? '#e8e2d0' : '#f4a259'; ctx.lineWidth = 0.3 * NM; ctx.beginPath();
+          for (let i = 0; i <= steps; i++) {
+            const u = i / steps, th = a0 + u * turns * TAU, s2 = u * turns * TAU * Rw / NM, rr = Rw + Math.sin((s2 / 3.4) * TAU + ph) * NM + u * 0.6 * NM;
+            const X2 = x + Math.cos(th) * rr, Y2 = y + Math.sin(th) * rr;
+            if (i) ctx.lineTo(X2, Y2); else ctx.moveTo(X2, Y2);
+          }
+          ctx.stroke();
+        }
+        if (pxnm >= 9) for (let i = 0; i < 147; i++) {
+          const u = i / 147, th = a0 + u * turns * TAU, s2 = u * turns * TAU * Rw / NM, r1 = Rw + Math.sin((s2 / 3.4) * TAU) * NM + u * 0.6 * NM, r2 = Rw + Math.sin((s2 / 3.4) * TAU + Math.PI * 0.8) * NM + u * 0.6 * NM;
+          ctx.strokeStyle = MONO_COLORS[dnaBase(seed, seg * 100 + k, i)]; ctx.lineWidth = 0.18 * NM;
+          ctx.beginPath(); ctx.moveTo(x + Math.cos(th) * r1, y + Math.sin(th) * r1); ctx.lineTo(x + Math.cos(th) * r2, y + Math.sin(th) * r2); ctx.stroke();
+        }
+        // Linker DNA (a double helix too) from this core to the next, and H1 where it enters and leaves.
+        const g = 25 * NM * (L / 25 / n), gap = Rw + 1.5 * NM;
+        if (k + 1 < n || f + 0.5 / n < 1) {
+          const xa = wx + ux * gap, ya = wy + uy * gap, xb = wx + ux * (g - gap), yb = wy + uy * (g - gap);
+          if (g > 2 * gap) this.drawHelix(xa, ya, xb, yb, seed, seg * 100 + k, false);
+        }
+        ctx.fillStyle = 'rgba(255,120,120,0.95)'; ctx.beginPath(); ctx.arc(x + ux * gap, y + uy * gap, 1.8 * NM, 0, TAU); ctx.fill();
+      }
     }
   }
+
 
   // New virus capsids piling up inside an infected cell until it bursts.
   drawInfection(c) {
