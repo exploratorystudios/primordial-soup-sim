@@ -116,7 +116,7 @@ export const CFG = {
                            // parent's form (or a mutated one). Filaments grow by inserting cells along their length.
   MORPH_STIFF: 0.08,       // how firmly bonds hold their angles
   MORPH_BRANCH_INIT: 0.5,  // founders' branching gene starts in [0, this): 1 + gene x 4 daughters per cell
-  DEVPLAN: false,          // developmental body plans, in place of MORPH's branching trees: each division turns its plane
+  DEVPLAN: true,           // developmental body plans, in place of MORPH's branching trees: each division turns its plane
                            // by a gene (0 = filament, 90° = sheet), with gene-set noise; growth at the tips only or
                            // everywhere; cells beyond a gene-set radius from the body's centre stop dividing (discs);
                            // colony cells bond to every colony-mate they touch (neighbour adhesion)
@@ -141,6 +141,8 @@ export const CFG = {
   // eukaryotic viruses can't infect bacteria. A new virus particle jumps to the other domain with VIRUS_JUMP.
   VIRUS_DOMAIN: true, VIRUS_JUMP: 0.001,
   PRED_P: 0.3,             // chance a hunt succeeds (0.25 kept predators rare; 0.4 ate too many colonies)
+  HUNT: false,             // hunting as an arms race: capture also depends on the chase (predator's swimming against the
+                           // prey's) and on prey size (best at a third to half the predator's size, as in protist predators)
   ENDO_P: 0.05,
   // Endosymbiosis by partnership (closer to the leading hypothesis: an archaeal host and an aerobic bacterium
   // living in close contact merge, without the host hunting): chance per contact. 0 = only the predation route.

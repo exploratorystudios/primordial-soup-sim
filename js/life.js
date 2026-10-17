@@ -883,7 +883,16 @@ export class Life {
     if (CFG.KIN_SPARE > 0 && a.species === b.species && a.energy > a.cap * CFG.KIN_SPARE) return false; // spares kin unless starving
     const rng = this.w.rng;
     const def = Math.min(0.95, b.armor * TM[b.type][5] * (b.type === T_GENERIC ? 1 : b.gf) * 0.8);
-    if (rng.next() > pa * (1 - def) * CFG.PRED_P) return false;
+    let hunt = 1;
+    if (CFG.HUNT) {
+      // The chase: a faster predator catches more, faster prey gets away more often (equal speeds: no penalty).
+      const ma = a.motil * TM[a.type][4] * a.gf, mb = b.motil * TM[b.type][4] * b.gf;
+      hunt = Math.min(1, (2 * (ma + 0.05)) / (ma + mb + 0.1));
+      // Prey size: best at a third to half the predator's own (by body radius), less for bigger or tinier prey.
+      const lq = Math.log(this.bodyRadius(b) / this.bodyRadius(a) / 0.4);
+      hunt *= Math.exp(-(lq * lq) / 0.5);
+    }
+    if (rng.next() > pa * (1 - def) * CFG.PRED_P * hunt) return false;
     const F = this.w.fields;
     const o2f = Math.min(1, F.get(F.oxygen, a.x, a.y) / CFG.O2_REF);
     const resp = 1 + a.aer * CFG.AERO_BONUS * o2f * (a.mito ? 2.5 : 1);
