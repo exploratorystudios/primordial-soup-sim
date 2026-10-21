@@ -198,10 +198,6 @@ Each of these is a setting (on by default since 2026-10-16, chosen by measuring 
 - **Hunting as an arms race** (`HUNT`, off by default): a predator's chance to catch its prey also depends on the chase (its swimming against the prey's: equal speeds cost nothing, faster prey escapes more often) and on prey size (best at a third to half its own size by radius, falling off for bigger or much smaller prey, as in real protist predators). `PRED_P` stays the overall scale.
 - Tried and left off: `TRADEOFF` (generalists in colonies work at 1 − `TRADEOFF` × min(1, (cells − 1)/15) strength, after Michod's convex trade-off; young colonies lost to free cells) and `SPEC_BONUS` (specialists work at 1 + `SPEC_BONUS` × the same; no clear gain).
 
-## Running it on a server
-
-`primordial-soup-sim-fly/` runs one world continuously on a server (made for Fly.io, see its README), and the page, when served from there, watches that world live instead of simulating its own.
-
 ## Files
 
 | file | role |
@@ -214,7 +210,6 @@ Each of these is a setting (on by default since 2026-10-16, chosen by measuring 
 | `js/viruses.js` | virus particles, infection, lysis, transduction |
 | `js/persist.js` | save / load worlds |
 | `js/live.js`, `js/liveframe.js` | watching a world that runs on a server: full snapshots and compact once-a-second frames |
-| `primordial-soup-sim-fly/` | the server version (one world running all the time, 12,000-cell cap) and how to deploy it on Fly.io |
 | `js/story.js`, `js/story-scout.js`, `js/story-chapters.js` | the tour: finding each transition in the world's history (a Web Worker), and playing it back with rewind |
 | `js/fields.js`, `js/spatial.js` | diffusing chemical grids, spatial hash |
 | `js/render.js` | true-scale renderer with semantic zoom (molecules, bilayers, organelles) |
