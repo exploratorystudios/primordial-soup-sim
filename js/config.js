@@ -128,6 +128,12 @@ export const CFG = {
   GERM_STEM: true,         // germline stem cells: a ready germ cell stays in the body and releases its daughter as the
                            // next generation's founder (a spore or egg), instead of leaving the body itself
   COLONY_SWIM: true,       // a colony swims as one body: its cells' combined thrust over the colony's whole mass
+  BODY_SWIM: false,        // coordinated swimming (with COLONY_SWIM): a colony's swimmers agree on one heading and all push
+                           // along it; water resists the body by its width across its travel (slim bodies moving lengthwise
+                           // are faster, broadside ones slower), and elongated bodies turn to swim along their length
+  BODY_DRAG_MIN: 0.5,      // drag of the slimmest body moving lengthwise, relative to a round one
+  BODY_DRAG_MAX: 1.4,      // drag of a body moving broadside
+  BODY_TURN: 0.5,          // how quickly an elongated body swings round to swim along its length
   MOT_COST: 0.015,
   MOT_SPEED: 0.35,
   O2_YIELD: 0.1,

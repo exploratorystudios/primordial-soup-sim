@@ -148,7 +148,7 @@ function frameStep() {
       if (world.milestones.length > seeking.from || world.t - seeking.start > 400000) { stopSeek(); break; }
     }
     alpha = 1;
-    rewind.record(world, performance.now() - t0);
+    rewind.record(world);
     if (seeking) $('btn-seek').textContent = `⏭ Seeking… tick ${world.t.toLocaleString()}`;
   } else if (rewinding) {
     rewindFrame();
@@ -162,12 +162,11 @@ function frameStep() {
     if (acc > 1) acc = 0; // (also what keeps Max from piling up)
     alpha = sp >= 1 ? 1 : acc;
     world.smooth = sp < 1; // only pay for in-between frames when they're visible
-    rewind.record(world, performance.now() - t0);
+    rewind.record(world);
   }
   if (now - tpsSince > 500) { tps = (tpsTicks * 1000) / (now - tpsSince); tpsTicks = 0; tpsSince = now; speedLabel(); }
   // Draw everything partway between ticks (the simulation itself never sees these positions).
   story.update(dt);
-  $('btn-tour').classList.toggle('active', story.active);
   world.beginInterp(alpha);
   opts.time = live ? live.time(now) : world.t - 1 + alpha; // (live: the clock glides between frames too)
   renderer.time = opts.time;
@@ -344,11 +343,6 @@ $('btn-seek').onclick = () => {
   if (story.active) return; // the tour's worlds are replays: jumping ahead would leave the scene
   seeking = { from: world.milestones.length, start: world.t };
   $('btn-seek').classList.add('active');
-};
-$('btn-tour').onclick = () => {
-  if (story.active) { story.stop(); return; }
-  stopSeek(); stopRewind();
-  story.start(seed);
 };
 $('btn-save').onclick = async () => {
   if (live) { location.href = '/api/save'; return; } // (the server's exact world, not this page's copy)
@@ -695,7 +689,7 @@ async function startLive() {
   live = feed;
   running = false;
   // The server runs the clock: no play, speed, rewind, new worlds, tour or planetary events here.
-  for (const id of ['btn-rew', 'btn-tour']) $(id).style.display = 'none';
+  for (const id of ['btn-rew']) $(id).style.display = 'none';
   const adm = document.createElement('button');
   adm.id = 'btn-admin';
   $('btn-fit').after(adm);

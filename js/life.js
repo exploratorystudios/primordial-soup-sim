@@ -124,9 +124,11 @@ export class Life {
     this.cells = [];
     this.newborns = [];
     // Per-colony sums, in arrays indexed by orgSlot (rebuilt each tick): CULL_FAIR's weakness (WS, WN),
-    // COLONY_SWIM's thrust and mass (SWX, SWY, SWM) and TISSUE_PUSH's shared push (PPX, PPY, PPA, PPHAS).
+    // COLONY_SWIM's thrust and mass (SWX, SWY, SWM), BODY_SWIM's total thrust and body shape (SWT; BN, BX, BY, BXX,
+    // BYY, BXY) and TISSUE_PUSH's shared push (PPX, PPY, PPA, PPHAS).
     this.oiMap = new Map(); this.nOi = 0; this.oiOrg = new Int32Array(0);
-    this.WS = this.WN = this.SWX = this.SWY = this.SWM = this.PPX = this.PPY = this.PPA = new Float64Array(0); this.PPHAS = new Uint8Array(0);
+    this.WS = this.WN = this.SWX = this.SWY = this.SWM = this.SWT = this.PPX = this.PPY = this.PPA = new Float64Array(0);
+    this.BN = this.BX = this.BY = this.BXX = this.BYY = this.BXY = new Float64Array(0); this.PPHAS = new Uint8Array(0);
     this.anySwim = false;
     this.soa = false; // positions in the shared arrays during a tick (see pull)
     this.slotCell = []; this.freeSlots = []; this.nextSlot = 0; // each living cell's fixed slot in the shared arrays
@@ -239,7 +241,8 @@ export class Life {
     this.anySwim = false;
     for (let k = 0; k < n; k++) if (!cells[k].dead) this.live(cells[k]);
     // Colonies swim as one body: the combined thrust moves every cell alike (more mass, slower).
-    if (this.anySwim) {
+    if (this.anySwim && CFG.BODY_SWIM) this.bodySwim(cells, n);
+    else if (this.anySwim) {
       for (let k = 0; k < n; k++) {
         const c = cells[k];
         if (c.dead || c.orgSize <= 1 || c.bonds.length === 0) continue;
@@ -277,7 +280,7 @@ export class Life {
       i = this.nOi++;
       this.roomOi(i + 1);
       this.oiMap.set(c.org, i); this.oiOrg[i] = c.org;
-      this.WS[i] = this.WN[i] = this.SWX[i] = this.SWY[i] = this.SWM[i] = this.PPX[i] = this.PPY[i] = this.PPA[i] = 0; this.PPHAS[i] = 0;
+      this.WS[i] = this.WN[i] = this.SWX[i] = this.SWY[i] = this.SWM[i] = this.SWT[i] = this.PPX[i] = this.PPY[i] = this.PPA[i] = 0; this.PPHAS[i] = 0;
     }
     c.oi = i;
     return i;
@@ -287,7 +290,7 @@ export class Life {
     if (n <= this.oiOrg.length) return;
     const cap = Math.max(256, n, this.oiOrg.length * 2), grow = (a, T) => { const b = new T(cap); b.set(a); return b; };
     this.oiOrg = grow(this.oiOrg, Int32Array);
-    for (const k of ['WS', 'WN', 'SWX', 'SWY', 'SWM', 'PPX', 'PPY', 'PPA']) this[k] = grow(this[k], Float64Array);
+    for (const k of ['WS', 'WN', 'SWX', 'SWY', 'SWM', 'SWT', 'PPX', 'PPY', 'PPA', 'BN', 'BX', 'BY', 'BXX', 'BYY', 'BXY']) this[k] = grow(this[k], Float64Array);
     this.PPHAS = grow(this.PPHAS, Uint8Array);
   }
 
@@ -502,12 +505,60 @@ export class Life {
     const V = this.V, f = V.OUTF[s];
     if (f & K.O_SENSED) { c.px = V.PX[s]; c.py = V.PY[s]; c.fx = V.FX[s]; c.fy = V.FY[s]; }
     if (f & K.O_RETHINK) { c.heading = V.HEAD[s] = V.HEADOUT[s]; c.dirX = V.DIRX[s]; c.dirY = V.DIRY[s]; }
-    if (col) { this.SWX[oi] += c.dirX * mot * CFG.MOT_SPEED; this.SWY[oi] += c.dirY * mot * CFG.MOT_SPEED; }
+    if (col) { this.SWX[oi] += c.dirX * mot * CFG.MOT_SPEED; this.SWY[oi] += c.dirY * mot * CFG.MOT_SPEED; this.SWT[oi] += mot * CFG.MOT_SPEED; }
     else {
       const th = (mot * CFG.MOT_SPEED) / Math.max(1, Math.sqrt(c.m));
       V.VXC[s] += c.dirX * th; V.VYC[s] += c.dirY * th;
     }
     c.energy -= mot * CFG.MOT_COST * c.m;
+  }
+
+  // BODY_SWIM: a colony swims as one coordinated body. Its swimmers agree on one heading (their sensed directions,
+  // weighted by thrust) and all push along it, so their thrust adds up instead of partly cancelling. Water resists
+  // the body by its width across the direction of travel: a slim body moving lengthwise slips through, one moving
+  // broadside is held back. And like a weathervane, an elongated body turns to swim along its length.
+  bodySwim(cells, n) {
+    const V = this.V, { SWX, SWY, SWM, SWT, BN, BX, BY, BXX, BYY, BXY } = this;
+    const member = (c) => !c.dead && c.orgSize > 1 && c.bonds.length > 0;
+    BN.fill(0, 0, this.nOi); BX.fill(0, 0, this.nOi); BY.fill(0, 0, this.nOi);
+    BXX.fill(0, 0, this.nOi); BYY.fill(0, 0, this.nOi); BXY.fill(0, 0, this.nOi);
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (!member(c)) continue;
+      const i = this.orgSlot(c);
+      if (!(SWT[i] > 0)) continue;
+      const x = V.X[c.slot], y = V.Y[c.slot];
+      BN[i]++; BX[i] += x; BY[i] += y; BXX[i] += x * x; BYY[i] += y * y; BXY[i] += x * y;
+    }
+    // Per body: heading, speed, and turning rate (kept in the moment arrays, which are done with by then).
+    for (let i = 0; i < this.nOi; i++) {
+      const m = BN[i];
+      if (!(m > 0)) continue;
+      const mx = BX[i] / m, my = BY[i] / m;
+      const sxx = BXX[i] / m - mx * mx, syy = BYY[i] / m - my * my, sxy = BXY[i] / m - mx * my;
+      let dx = SWX[i], dy = SWY[i];
+      const dl = Math.hypot(dx, dy);
+      if (!(dl > 0)) { BN[i] = 0; continue; }
+      dx /= dl; dy /= dl;
+      // Spread of the body along the heading and across it (cell radius squared keeps small bodies round).
+      const r2 = 9, along = dx * dx * sxx + 2 * dx * dy * sxy + dy * dy * syy, across = Math.max(0, sxx + syy - along);
+      const drag = Math.min(CFG.BODY_DRAG_MAX, Math.max(CFG.BODY_DRAG_MIN, Math.sqrt((across + r2) / ((along + across) / 2 + r2))));
+      const v = SWT[i] / (Math.max(1, Math.sqrt(SWM[i])) * drag);
+      // Long axis and how elongated the body is; turn it toward the heading, faster the faster it swims.
+      const half = (sxx - syy) / 2, rad = Math.hypot(half, sxy), big = (sxx + syy) / 2 + rad, small = (sxx + syy) / 2 - rad;
+      const axis = Math.atan2(sxy, half) / 2, elong = big > 0 ? 1 - Math.max(0, small) / big : 0;
+      const w = CFG.BODY_TURN * Math.sin(2 * (Math.atan2(dy, dx) - axis)) / 2 * elong * v / Math.sqrt(big + r2);
+      BX[i] = mx; BY[i] = my; BXX[i] = dx * v; BYY[i] = dy * v; BXY[i] = w;
+    }
+    for (let k = 0; k < n; k++) {
+      const c = cells[k];
+      if (!member(c)) continue;
+      const i = this.orgSlot(c);
+      if (!(BN[i] > 0)) continue;
+      const s = c.slot, w = BXY[i];
+      V.VXC[s] += BXX[i] - w * (V.Y[s] - BY[i]);
+      V.VYC[s] += BYY[i] + w * (V.X[s] - BX[i]);
+    }
   }
 
   // ---------------------------------------------------------------- positions during a tick

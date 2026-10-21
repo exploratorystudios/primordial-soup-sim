@@ -1,15 +1,17 @@
 // Rewind: play the recent past backwards at the current speed.
-// While the world runs forward it is saved every so often (keeping the cost to ~5% of the simulation
-// time, and the memory bounded). Going backwards restores the nearest earlier save and replays
+// While the world runs forward it is saved on a fixed schedule, so the last 25,000 ticks can always be
+// rewound: every 100 ticks for the most recent stretch, thinned to every 500 further back (keeping the
+// memory to a few hundred MB even late in a run). Going backwards restores the nearest earlier save and replays
 // forward to the tick wanted, which reproduces the history exactly. For tick-by-tick rewinding, the
 // stretch being rewound through is first replayed once and saved densely, so each step back only
 // needs a short replay.
 import { deserialize, serialize } from './persist.js';
 
-const MIN_GAP = 25;        // ticks between saves, at least
-const OVERHEAD = 0.05;     // fraction of simulation time spent saving, at most
-const MAX_BYTES = 100e6;   // memory for saves (oldest dropped first)
-const MAX_SAVES = 200;
+const HORIZON = 25000;     // ticks of history kept
+const GAP = 100;           // ticks between saves for the most recent stretch
+const RECENT = 2500;       // how far back the saves stay that dense
+const OLD_GAP = 500;       // ticks between saves further back
+const MAX_BYTES = 600e6;   // backstop only: past this the oldest saves go
 const FINE = 10;           // dense saves while rewinding tick by tick
 
 const save = (w) => JSON.stringify(serialize(w));
@@ -21,28 +23,40 @@ export class Rewind {
   clear() {
     this.saves = [];
     this.bytes = 0;
-    this.cost = 0;   // ms the last save took
-    this.simMs = 0;  // simulation time since the last save
     this.fine = null;
   }
 
   oldest() { return this.saves.length ? this.saves[0].t : Infinity; }
 
-  // Called after the world has been stepped forward, with the ms spent stepping.
-  record(w, simMs) {
+  // Called after the world has been stepped forward.
+  record(w) {
     // Running forward again after a rewind: what was saved ahead of here is replayed anew.
     while (this.saves.length && this.saves[this.saves.length - 1].t > w.t) this.bytes -= this.saves.pop().s.length;
     this.fine = null;
-    this.simMs += simMs;
     const last = this.saves[this.saves.length - 1];
-    if (last && (w.t - last.t < MIN_GAP || this.simMs * OVERHEAD < this.cost)) return;
-    const t0 = performance.now();
+    // (a frame can step many ticks: save once the world has crossed into the next stretch of GAP)
+    if (last && Math.floor(w.t / GAP) === Math.floor(last.t / GAP)) return;
     const s = save(w);
-    this.cost = performance.now() - t0;
-    this.simMs = 0;
     this.saves.push({ t: w.t, s });
     this.bytes += s.length;
-    while (this.saves.length > 2 && (this.bytes > MAX_BYTES || this.saves.length > MAX_SAVES)) this.bytes -= this.saves.shift().s.length;
+    this.trim(w.t);
+  }
+
+  trim(now) {
+    // Thin out the older saves to one per OLD_GAP ticks.
+    const kept = [];
+    let bytes = 0;
+    for (const q of this.saves) {
+      const prev = kept[kept.length - 1];
+      if (prev && q.t < now - RECENT && Math.floor(q.t / OLD_GAP) === Math.floor(prev.t / OLD_GAP)) continue;
+      kept.push(q);
+      bytes += q.s.length;
+    }
+    // Forget what is past the horizon, keeping one save at or before it so all of it can be reached.
+    while (kept.length > 1 && kept[1].t <= now - HORIZON) bytes -= kept.shift().s.length;
+    while (kept.length > 2 && bytes > MAX_BYTES) bytes -= kept.shift().s.length;
+    this.saves = kept;
+    this.bytes = bytes;
   }
 
   // The latest save at or before tick t.
